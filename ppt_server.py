@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import io, traceback
 
 import build_brandbook_v3 as B
+import build_brandbook_book as BOOK
 import to_schema_v3 as TS
 
 app = FastAPI()
@@ -26,7 +27,8 @@ def _is_schema(d):
 
 @app.get("/")
 def health():
-    return {"ok": True, "service": "brandbook-ppt-server-v3", "palettes": sorted(VALID_PAL)}
+    return {"ok": True, "service": "brandbook-ppt-server-v3",
+            "palettes": sorted(VALID_PAL), "skins": ["v3", "book"]}
 
 @app.post("/build")
 async def build(req: Request):
@@ -72,10 +74,16 @@ async def build(req: Request):
         return JSONResponse({"error":"schema convert failed","detail":str(e),
                              "trace":traceback.format_exc()}, status_code=500)
 
+    # 스킨 선택 (기본 v3, book 선택 시 책펼침 렌더러)
+    skin = (payload.get("skin") or "v3").lower()
+
     # 빌드
     try:
         buf = io.BytesIO()
-        B.build(schema, palette=palette, out=buf)   # build가 file-like도 받게
+        if skin == "book":
+            BOOK.build(schema, palette=palette, out=buf)
+        else:
+            B.build(schema, palette=palette, out=buf)   # build가 file-like도 받게
         buf.seek(0)
         fname = (schema.get("academy",{}).get("name","brandbook")) + f"_{palette}.pptx"
         return Response(
