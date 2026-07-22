@@ -14,6 +14,7 @@ import build_brandbook_v3 as B
 import build_brandbook_book as BOOK
 import to_schema_v3 as TS
 import build_leaflet_coord as LEAFLET
+from navy_registry import render as skin_render, list_options as navy_options
 
 app = FastAPI()
 app.add_middleware(
@@ -29,7 +30,8 @@ def _is_schema(d):
 @app.get("/")
 def health():
     return {"ok": True, "service": "brandbook-ppt-server-v3",
-            "palettes": sorted(VALID_PAL), "skins": ["v3", "book"],
+            "palettes": sorted(VALID_PAL), "skins": ["v3", "book", "navy"],
+            "navy": navy_options(),
             "leaflet_palettes": ["sewon_teal", "sewon_yellow", "navy_amber"]}
 
 GRADE_KW = {"elem": "초", "mid": "중", "high": "고"}
@@ -163,12 +165,17 @@ async def build(req: Request):
 
     # 빌드
     try:
-        buf = io.BytesIO()
-        if skin == "book":
-            BOOK.build(schema, palette=palette, out=buf)
+        if skin == "navy":
+            kind = (payload.get("kind") or "ppt").lower()
+            buf = skin_render(schema, skin="navy", kind=kind,
+                              palette=payload.get("palette"))
         else:
-            B.build(schema, palette=palette, out=buf)   # build가 file-like도 받게
-        buf.seek(0)
+            buf = io.BytesIO()
+            if skin == "book":
+                BOOK.build(schema, palette=palette, out=buf)
+            else:
+                B.build(schema, palette=palette, out=buf)   # build가 file-like도 받게
+            buf.seek(0)
         fname = (schema.get("academy",{}).get("name","brandbook")) + f"_{palette}.pptx"
         return Response(
             content=buf.read(),
