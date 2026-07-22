@@ -242,9 +242,14 @@ async def build_leaflet(req: Request):
         pass
 
     try:
-        buf = io.BytesIO()
-        LEAFLET.build(schema, palette=pal, out=buf, assets=payload.get("assets") or {})
-        buf.seek(0)
+        # skin=navy 면 새 디자인 리플렛, 아니면 기존 리플렛 그대로
+        if (payload.get("skin") or "").lower() == "navy":
+            buf = skin_render(schema, skin="navy", kind="leaflet",
+                              palette=payload.get("palette"))
+        else:
+            buf = io.BytesIO()
+            LEAFLET.build(schema, palette=pal, out=buf, assets=payload.get("assets") or {})
+            buf.seek(0)
         return Response(
             content=buf.read(),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -252,4 +257,63 @@ async def build_leaflet(req: Request):
         )
     except Exception as e:
         return JSONResponse({"error": "leaflet build failed", "detail": str(e),
+                             "trace": traceback.format_exc()}, status_code=500)
+
+
+@app.post("/build-catalog")
+async def build_catalog(req: Request):
+    """카탈로그(A4 세로) 생성. /build 와 같은 payload 사용.
+    payload: { data, raw?, brand?, filter?, palette?, skin? }
+      palette: navy_gold | charcoal_gold | forest_gold (옛 팔레트명도 흡수)
+      skin   : navy (기본). 현재 카탈로그는 navy 스킨만 지원.
+    """
+    try:
+        payload = await req.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    data = payload.get("data") or payload.get("schema") or payload
+    raw = payload.get("raw")
+    brand = payload.get("brand") or {}
+    filt = payload.get("filter") or {}
+
+    # 스키마 변환/보강 (/build-leaflet 과 동일 로직)
+    try:
+        if _is_schema(data):
+            schema = data
+            if raw:
+                try:
+                    conv = TS.convert(raw, brand)
+                    for key in ("timetables", "faq", "management", "admission",
+                                "curriculum", "targets", "features", "achievements",
+                                "specials", "intro"):
+                        if not schema.get(key) and conv.get(key):
+                            schema[key] = conv[key]
+                    ac = schema.setdefault("academy", {})
+                    for k, v in (conv.get("academy") or {}).items():
+                        if not ac.get(k) and v:
+                            ac[k] = v
+                except Exception:
+                    pass
+        else:
+            schema = TS.convert(data, brand)
+    except Exception as e:
+        return JSONResponse({"error": "schema convert failed", "detail": str(e),
+                             "trace": traceback.format_exc()}, status_code=500)
+
+    try:
+        schema = _apply_filter(schema, filt)
+    except Exception:
+        pass
+
+    try:
+        buf = skin_render(schema, skin="navy", kind="catalog",
+                          palette=payload.get("palette"))
+        return Response(
+            content=buf.read(),
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": 'attachment; filename="catalog.pptx"'},
+        )
+    except Exception as e:
+        return JSONResponse({"error": "catalog build failed", "detail": str(e),
                              "trace": traceback.format_exc()}, status_code=500)
