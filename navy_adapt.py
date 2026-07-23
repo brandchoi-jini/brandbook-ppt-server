@@ -211,19 +211,32 @@ def adapt(schema):
             feats.append({"title": f.strip()[:14], "desc": f.strip()})
     d["strengths"] = feats
 
-    # 철학 — 실제 v3 에는 없다. 수업대상을 포인트로 재활용.
-    pts = []
+    # 수업 대상 — 학년별 과목/반 구성. 별도 섹션으로 넘긴다.
+    tgts = []
     for it in _items(schema.get("targets")):
         if isinstance(it, dict):
             g = _s(it.get("grade"))
             sj = _s(it.get("subj"))
-            if g:
-                pts.append({"title": f"{g}  {sj}".strip()})
-    if pts or _s(intro.get("body")):
+            ds = _s(it.get("desc"))
+            if g or sj or ds:
+                tgts.append({"grade": g, "subj": sj, "desc": ds})
+    d["targets"] = tgts
+    d["targetsHead"] = _head(schema.get("targets"), "학년별 수업 대상")
+
+    # 학원 소개 — 유미니 JSON의 소개문구(intro.body)를 그대로 쓴다.
+    # 대부분의 학원이 소개문구를 가지고 있으므로 이 페이지는 거의 항상 만들어진다.
+    body = _s(intro.get("body"))
+    if body:
+        ihead = _s(intro.get("head"))
+        # 표지 슬로건이나 강점 페이지 헤드라인과 겹치면 중복이므로
+        # 일반 소개 제목을 쓴다 (강점 헤드라인 = identity.headline)
+        used = {slogan, _s(d.get("identity", {}).get("headline"))}
+        if not ihead or ihead in used:
+            ihead = f"{name} 소개"
         d["philosophy"] = {
-            "headline": _head(schema.get("targets"), "학년에 꼭 맞는 과정"),
-            "intro": _s(intro.get("body")),
-            "points": pts[:4],
+            "headline": ihead,
+            "intro": body,
+            "points": [],
             "note": {},
         }
 

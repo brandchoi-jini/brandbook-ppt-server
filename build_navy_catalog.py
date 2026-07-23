@@ -108,7 +108,7 @@ def c_philosophy(prs, d, P, page):
     if not (pts or strengths or intro):
         return None
     s = blank_slide(prs)
-    y = head(s, P, "PHILOSOPHY",
+    y = head(s, P, "ABOUT",
              clean(ph.get("headline") or gv(d, "identity", "headline")
                    or "공부하는 방법이 결과를 만듭니다"),
              intro)
@@ -375,6 +375,19 @@ def c_admission(prs, d, P, page):
                      color=P["muted"], line_spacing=1.45)
             y += 1.0
 
+    # 약도 (연락처 위 여백이 충분할 때)
+    mapimg = gv(d, "assets", "map")
+    if mapimg and y + 1.35 < SH - 2.5:
+        mh = min(2.0, (SH - 2.5) - y - 0.2)
+        if mh >= 1.0:
+            add_text(s, ML, y, 2.2, 0.24, "오시는 길", size=FS.small,
+                     bold=True, color=P["primary"], line_spacing=1.0)
+            y += 0.32
+            mh = min(mh, (SH - 2.5) - y)
+            add_box(s, ML, y, CW, mh, fill=P["card"], line=P["line"], radius=R)
+            place_image(s, mapimg, ML + 0.06, y + 0.06,
+                        CW - 0.12, mh - 0.12, cover=False)
+
     # 연락처 블록
     by = SH - 2.35
     add_box(s, ML, by, CW, 1.4, fill=P["deep"], radius=R)
@@ -400,7 +413,7 @@ def build(data, out=None, palette=None):
 
     c_cover(prs, d, P)
     page = 2
-    for fn in (c_philosophy, c_curriculum, c_results, c_schedule, c_admission):
+    for fn in (c_philosophy, c_results, c_curriculum, c_schedule, c_admission):
         if fn(prs, d, P, page) is not None:
             page += 1
 

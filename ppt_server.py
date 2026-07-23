@@ -167,6 +167,10 @@ async def build(req: Request):
     try:
         if skin == "navy":
             kind = (payload.get("kind") or "ppt").lower()
+            _as = payload.get("assets") or {}
+            if _as:
+                schema = dict(schema)
+                schema["assets"] = _as
             buf = skin_render(schema, skin="navy", kind=kind,
                               palette=payload.get("palette"))
         else:
@@ -244,6 +248,10 @@ async def build_leaflet(req: Request):
     try:
         # skin=navy 면 새 디자인 리플렛, 아니면 기존 리플렛 그대로
         if (payload.get("skin") or "").lower() == "navy":
+            _as = payload.get("assets") or {}
+            if _as:
+                schema = dict(schema)
+                schema["assets"] = _as
             buf = skin_render(schema, skin="navy", kind="leaflet",
                               palette=payload.get("palette"))
         else:
@@ -307,6 +315,10 @@ async def build_catalog(req: Request):
         pass
 
     try:
+        _as = payload.get("assets") or {}
+        if _as:
+            schema = dict(schema)
+            schema["assets"] = _as
         buf = skin_render(schema, skin="navy", kind="catalog",
                           palette=payload.get("palette"))
         return Response(

@@ -103,6 +103,19 @@ def p_admission(s, d, P, x):
         add_text(s, x + 0.26, by + 1.2, CW - 0.52, 0.57,
                  wrap_words(addr, 20)[:2], size=FS.small,
                  color=P["muted"], line_spacing=1.4)
+
+    # 약도 — 연락처 박스 아래 남는 공간에
+    mapimg = gv(d, "assets", "map")
+    my = by + 1.88 + 0.28
+    if mapimg and my + 1.0 < SH - 0.4:
+        mh = min(1.9, SH - 0.4 - my - 0.3)
+        add_text(s, x, my, 2.0, 0.22, "오시는 길", size=8.0,
+                 bold=True, color=P["primary"], line_spacing=1.0)
+        my += 0.3
+        mh = min(mh, SH - 0.4 - my)
+        add_box(s, x, my, CW, mh, fill=P["card"], line=P["line"], radius=R)
+        place_image(s, mapimg, x + 0.05, my + 0.05,
+                    CW - 0.1, mh - 0.1, cover=False)
     return True
 
 
@@ -152,7 +165,7 @@ def p_philosophy(s, d, P, x):
     intro = clean(ph.get("intro") or gv(d, "identity", "intro") or "")
     if not pts and not intro:
         return False
-    hb = head(s, P, x, "WHY US", wrap_words(
+    hb = head(s, P, x, "ABOUT", wrap_words(
         clean(ph.get("headline") or "공부하는 방법이 결과를 만듭니다"), 13)[:3])
     y = hb + 0.28
     if intro:

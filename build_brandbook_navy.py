@@ -31,9 +31,73 @@ R = 0.055
 
 
 # ══════════════════════════════════════════════════════════════════
+# 여백 채움 헬퍼
+# ══════════════════════════════════════════════════════════════════
+def _photo_pool(d):
+    """본문에 쓸 수 있는 사진 목록. 표지 사진은 중복을 피해 뒤로 돌린다."""
+    a = d.get("assets") or {}
+    pool = []
+    for p in (a.get("photos") or []):
+        if p and p not in pool:
+            pool.append(p)
+    for k in ("cover", "photo"):
+        v = a.get(k)
+        if v and v not in pool:
+            pool.append(v)
+    return pool
+
+
+def take_photo(d, used):
+    """아직 안 쓴 사진 하나. 없으면 None (있는 것만 재사용은 하지 않는다)."""
+    for p in _photo_pool(d):
+        if p not in used:
+            used.add(p)
+            return p
+    return None
+
+
+def fill_gap(s, d, P, used, y_from, x=None, w=None, y_to=6.55,
+             min_h=1.15, caption=None):
+    if used is None:
+        used = set()
+    """
+    페이지 아래쪽 빈 공간에 사진을 넣는다.
+    남은 높이가 min_h 미만이면 아무것도 하지 않는다(억지로 늘리지 않음).
+    사진이 없으면 얇은 구분선만 그어 마무리한다.
+    """
+    x = G.ML if x is None else x
+    w = G.CW if w is None else w
+    h = y_to - y_from
+    if h < min_h:
+        return False
+
+    src = take_photo(d, used)
+    if not src:
+        # 사진이 없으면 억지로 늘리지 않는다.
+        # 다만 여백이 크게 남으면 마감선을 그어 '미완성처럼' 보이지 않게 한다.
+        if h >= 1.6:
+            add_box(s, x, y_from + 0.1, w, 0.012, fill=P["line"])
+        return False
+
+    h = min(h, 2.9)
+    # cover 는 비율 유지를 위해 영역 밖으로 넘칠 수 있다(슬라이드 이탈).
+    # 여백 채움에서는 영역 안에 들어오는 contain 방식을 쓴다.
+    add_box(s, x, y_from, w, h, fill=P["card"], radius=R)
+    ok = place_image(s, src, x + 0.06, y_from + 0.06,
+                     w - 0.12, h - 0.12, cover=False)
+    if ok is None:
+        return False
+    if caption:
+        add_text(s, x + 0.24, y_from + h - 0.44, w - 0.48, 0.3, caption,
+                 size=FS.small, bold=True, color=P["onDark"],
+                 line_spacing=1.0, shrink=False, clip=False)
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════
 # 01. 표지
 # ══════════════════════════════════════════════════════════════════
-def s_cover(prs, d, P):
+def s_cover(prs, d, P, used=None):
     s = blank_slide(prs)
     b = d.get("basic", {})
     name = clean(b.get("name") or "학원")
@@ -51,6 +115,8 @@ def s_cover(prs, d, P):
     add_box(s, panel_x, 0, panel_w, SLIDE_H, fill=P["deep"])
     if photo:
         place_image(s, photo, panel_x, 0, panel_w, SLIDE_H, cover=True)
+        if used is not None:
+            used.add(photo)
 
     # 로고
     y = 0.47
@@ -94,7 +160,7 @@ def s_cover(prs, d, P):
 # ══════════════════════════════════════════════════════════════════
 # 02. 강점 카드 (2~6개, 3열 그리드)
 # ══════════════════════════════════════════════════════════════════
-def s_strengths(prs, d, P, page):
+def s_strengths(prs, d, P, page, used=None):
     items = as_dicts(d.get("strengths") or gv(d, "identity", "strengths"))
     if not items:
         return None
@@ -130,13 +196,17 @@ def s_strengths(prs, d, P, page):
             add_text(s, x + 0.25, y + 1.02, cw - 0.5, ch - 1.22, body,
                      size=fit_size(body, FS.body, cw - 0.5, ch - 1.22),
                      color=P["muted"], line_spacing=1.4)
+
+    # 카드 아래가 비면 학원 사진으로 채운다
+    bottom = top + rows * ch + (rows - 1) * 0.4
+    fill_gap(s, d, P, used, bottom + 0.42)
     return s
 
 
 # ══════════════════════════════════════════════════════════════════
 # 03. 철학 / 왜 우리인가 (좌 체크리스트 + 우 강조박스)
 # ══════════════════════════════════════════════════════════════════
-def s_philosophy(prs, d, P, page):
+def s_philosophy(prs, d, P, page, used=None):
     ph = d.get("philosophy") or {}
     points = as_dicts(ph.get("points"), "title")
     intro = clean(ph.get("intro") or gv(d, "identity", "intro") or "")
@@ -144,13 +214,25 @@ def s_philosophy(prs, d, P, page):
     if not points and not intro:
         return None
     s = blank_slide(prs)
-    hb = page_head(s, P, "WHY US",
+    hb = page_head(s, P, "ABOUT",
               clean(ph.get("headline") or "공부하는 방법이 결과를 만듭니다"),
               None, page)
 
     if intro:
-        add_text(s, G.ML, max(1.88, hb), 5.47, 1.04, intro, size=FS.body,
-                 color=P["muted"], line_spacing=1.5)
+        # 포인트가 없으면 오른쪽 박스도 없으므로 전폭으로 크게 배치
+        if points:
+            add_text(s, G.ML, max(1.88, hb), 5.47, 1.04, intro, size=FS.body,
+                     color=P["muted"], line_spacing=1.5)
+        else:
+            iy = max(1.88, hb)
+            # 실제 글 분량만큼만 높이를 잡는다 (남는 공간은 사진으로)
+            ilines = wrap_words(intro, max(24, int(G.CW * 72 / (FS.lead * 1.55))))
+            ih = min(2.6, len(ilines) * FS.lead * 1.7 / 72.0 + 0.1)
+            add_text(s, G.ML, iy, G.CW, ih, intro,
+                     size=FS.lead, color=P["text"], line_spacing=1.7)
+            # 아래 여백에 학원 사진
+            if not points:
+                fill_gap(s, d, P, used, iy + ih + 0.42)
 
     y = 3.39
     for i, p in enumerate(points[:4]):
@@ -161,7 +243,10 @@ def s_philosophy(prs, d, P, page):
                  anchor=MSO_ANCHOR.MIDDLE, line_spacing=1.0)
         y += 0.725
 
-    # 우측 강조 박스
+    # 우측 강조 박스 (포인트나 노트가 있을 때만)
+    has_note = any(clean(note.get(k) or "") for k in ("title", "body", "footer"))
+    if not (points or has_note):
+        return s
     bx, by, bw, bh = 7.08, 1.82, 5.42, 4.17
     add_box(s, bx, by, bw, bh, fill=P["card"], line=P["line"], radius=R)
     ny = by + 0.47
@@ -183,9 +268,63 @@ def s_philosophy(prs, d, P, page):
 
 
 # ══════════════════════════════════════════════════════════════════
+# 03-2. 수업 대상 (학년별 과목·반 구성)
+# ══════════════════════════════════════════════════════════════════
+GRADE_ORDER = ["초등", "중등", "고등", "특강", "기타"]
+
+
+def s_targets(prs, d, P, page, used=None):
+    items = as_dicts(d.get("targets"), "grade")
+    items = [it for it in items
+             if clean(it.get("grade") or it.get("subj") or it.get("desc"))]
+    if not items:
+        return None
+    items = items[:4]
+    s = blank_slide(prs)
+    hb = page_head(s, P, "CLASSES",
+                   clean(d.get("targetsHead") or "학년별 수업 대상"),
+                   "학년과 과목에 맞춰 반을 나누어 운영합니다.", page)
+
+    top = max(G.y_body, hb)
+    avail = 6.5 - top
+    n = len(items)
+    gap = 0.24
+    ch = min(1.5, (avail - gap * (n - 1)) / n)
+
+    for i, it in enumerate(items):
+        y = top + i * (ch + gap)
+        add_box(s, G.ML, y, G.CW, ch, fill=P["card"], line=P["line"], radius=R)
+
+        grade = clean(it.get("grade") or "")
+        gw = min(1.6, max(0.9, 0.44 + len(grade) * 0.15))
+        add_pill(s, G.ML + 0.26, y + (ch - 0.33) / 2, gw, 0.33, grade,
+                 fill=P["primary"], color=P["onDark"], size=FS.small)
+
+        tx = G.ML + 0.26 + gw + 0.3
+        tw = G.CW - (tx - G.ML) - 0.3
+        subj = clean(it.get("subj") or "")
+        desc = clean(it.get("desc") or "")
+
+        if subj and desc:
+            add_text(s, tx, y + 0.24, tw, 0.3, subj,
+                     size=FS.card_ttl, bold=True, color=P["text"],
+                     line_spacing=1.1)
+            add_text(s, tx, y + 0.64, tw, ch - 0.86, desc,
+                     size=fit_size(desc, FS.body, tw, ch - 0.86),
+                     color=P["muted"], line_spacing=1.45)
+        else:
+            one = subj or desc
+            add_text(s, tx, y, tw, ch, one,
+                     size=fit_size(one, FS.body + 0.75, tw, ch - 0.3),
+                     bold=bool(subj), color=P["text"],
+                     anchor=MSO_ANCHOR.MIDDLE, line_spacing=1.4)
+    return s
+
+
+# ══════════════════════════════════════════════════════════════════
 # 04. 커리큘럼 (학년별 카드 + 태그 필)
 # ══════════════════════════════════════════════════════════════════
-def s_curriculum(prs, d, P, page):
+def s_curriculum(prs, d, P, page, used=None):
     stages = as_dicts(d.get("curriculum"), "name")
     if not stages:
         return None
@@ -238,7 +377,7 @@ def s_curriculum(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 05. 특별 프로그램 (2x2)
 # ══════════════════════════════════════════════════════════════════
-def s_specials(prs, d, P, page):
+def s_specials(prs, d, P, page, used=None):
     items = as_dicts(d.get("specials"))
     if not items:
         return None
@@ -268,7 +407,7 @@ def s_specials(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 06. 학습관리 (2x2 카드, 좌 키워드 / 우 설명)
 # ══════════════════════════════════════════════════════════════════
-def s_management(prs, d, P, page):
+def s_management(prs, d, P, page, used=None):
     items = as_dicts(d.get("management"))
     if not items:
         return None
@@ -298,7 +437,7 @@ def s_management(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 07. 성장 경로 (단계 카드 + 화살표)
 # ══════════════════════════════════════════════════════════════════
-def s_growth(prs, d, P, page):
+def s_growth(prs, d, P, page, used=None):
     steps = as_dicts(d.get("growth"), "name")
     if not steps:
         return None
@@ -339,7 +478,7 @@ def s_growth(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 08. 실적 (큰 숫자 카드 3단)
 # ══════════════════════════════════════════════════════════════════
-def s_achievements(prs, d, P, page):
+def s_achievements(prs, d, P, page, used=None):
     items = as_dicts(d.get("achievements"))
     if not items:
         return None
@@ -431,7 +570,7 @@ def _set_cell(cell, text, P, size, bold=False, color=None,
     _latin_font(r)
 
 
-def s_timetables(prs, d, P, page):
+def s_timetables(prs, d, P, page, used=None):
     """시간표 = 진짜 table 객체 (PowerPoint에서 행 추가·수정 가능).
     행이 많으면 잘라내지 않고 '(이어서)' 표로 분할한다."""
     groups = as_dicts(d.get("timetables"), "group")
@@ -466,6 +605,7 @@ def s_timetables(prs, d, P, page):
         gap = 0.4
         tw = (G.CW - gap * (n - 1)) / n
         top = max(2.05, hb + 0.4)
+        tbl_bottom = top
 
         for gi, u in enumerate(pair):
             x = G.ML + gi * (tw + gap)
@@ -478,7 +618,9 @@ def s_timetables(prs, d, P, page):
                      line_spacing=1.0)
 
             avail = 6.55 - top
-            row_h = min(0.44, max(0.3, (avail - 0.46) / len(rows)))
+            # 행이 적으면 넉넉히, 많으면 촘촘히 (지면을 고르게 채운다)
+            row_h = (avail - 0.46) / max(len(rows), 1)
+            row_h = min(0.62, max(0.3, row_h))
             th = 0.46 + row_h * len(rows)
 
             gf = s.shapes.add_table(len(rows) + 1, 2, Inches(x), Inches(top),
@@ -499,6 +641,9 @@ def s_timetables(prs, d, P, page):
                           True, P["text"])
                 _set_cell(tbl.cell(ri, 1), tm, P, FS.body_sm, False,
                           P["muted"], PP_ALIGN.RIGHT)
+            tbl_bottom = max(tbl_bottom, top + th)
+        # 표 아래가 많이 비면 사진으로 채운다
+        fill_gap(s, d, P, used, tbl_bottom + 0.45, min_h=1.35)
         made.append(s)
     return made
 
@@ -506,7 +651,7 @@ def s_timetables(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 10. 입학 절차 (번호 카드)
 # ══════════════════════════════════════════════════════════════════
-def s_admission(prs, d, P, page):
+def s_admission(prs, d, P, page, used=None):
     steps = as_dicts(d.get("admission"))
     if not steps:
         return None
@@ -544,7 +689,7 @@ def s_admission(prs, d, P, page):
 # ══════════════════════════════════════════════════════════════════
 # 11. FAQ (2x2 카드)
 # ══════════════════════════════════════════════════════════════════
-def s_faq(prs, d, P, page):
+def s_faq(prs, d, P, page, used=None):
     items = as_dicts(d.get("faq"), "q")
     items = [x for x in items if clean(x.get("q") or x.get("question"))]
     if not items:
@@ -572,13 +717,17 @@ def s_faq(prs, d, P, page):
         add_text(s, x + 0.61, y + 0.69, cw - 0.88, ch - 0.9, a,
                  size=fit_size(a, FS.body, cw - 0.88, ch - 0.9),
                  color=P["muted"], line_spacing=1.5)
+
+    rows_n = -(-len(items) // 2)
+    bottom = 1.93 + rows_n * gy - (gy - ch)
+    fill_gap(s, d, P, used, bottom + 0.42)
     return s
 
 
 # ══════════════════════════════════════════════════════════════════
 # 12. 연락처 / 마무리
 # ══════════════════════════════════════════════════════════════════
-def s_contact(prs, d, P, page):
+def s_contact(prs, d, P, page, used=None):
     s = blank_slide(prs)
     b = d.get("basic", {})
     ct = d.get("contact") or {}
@@ -588,25 +737,50 @@ def s_contact(prs, d, P, page):
 
     qr = gv(d, "assets", "qr")
     mapimg = gv(d, "assets", "map")
-    img = qr or mapimg
-    ty = 1.93
-    if img:
-        place_image(s, img, 0.82, 1.93, 1.87, 1.51, cover=False)
-        ty = 4.06
 
     phone = clean(b.get("phone") or "")
     addr = clean(b.get("address") or "")
-    if phone:
-        add_text(s, 0.6, ty, 1.86, 0.25, "전화 문의", size=FS.small,
-                 bold=True, color=P["primary"], line_spacing=1.0)
-        add_text(s, 0.6, ty + 0.32, 4.17, 0.4, phone, size=FS.header * 0.78,
-                 bold=True, color=P["text"], line_spacing=1.0)
-    if addr:
-        add_text(s, 0.6, ty + 0.99, 4.9, 0.68, wrap_words(addr, 22)[:2],
-                 size=FS.body, color=P["muted"], line_spacing=1.5)
 
-    # 우측 안내 박스
-    bx, by, bw, bh = 6.67, 1.82, 5.83, 4.06
+    # 좌측: 연락처 → 약도 순. 약도는 '오시는 길'이므로 크게 보여준다.
+    ty = max(1.93, hb)
+    if phone:
+        add_text(s, G.ML, ty, 1.86, 0.25, "전화 문의", size=FS.small,
+                 bold=True, color=P["primary"], line_spacing=1.0)
+        add_text(s, G.ML, ty + 0.32, 4.17, 0.4, phone, size=FS.header * 0.78,
+                 bold=True, color=P["text"], line_spacing=1.0)
+        ty += 0.85
+    if addr:
+        add_text(s, G.ML, ty, 4.9, 0.68, wrap_words(addr, 22)[:2],
+                 size=FS.body, color=P["muted"], line_spacing=1.5)
+        ty += 0.78
+
+    if mapimg:
+        # 약도: 좌측 하단을 넉넉히 사용
+        mh = min(2.55, 6.35 - ty - 0.3)
+        if mh >= 1.0:
+            add_text(s, G.ML, ty, 2.2, 0.25, "오시는 길", size=FS.small,
+                     bold=True, color=P["primary"], line_spacing=1.0)
+            ty += 0.34
+            mh = min(2.55, 6.35 - ty)
+            add_box(s, G.ML, ty, 5.42, mh, fill=P["card"],
+                    line=P["line"], radius=R)
+            place_image(s, mapimg, G.ML + 0.06, ty + 0.06,
+                        5.42 - 0.12, mh - 0.12, cover=False)
+            if used is not None:
+                used.add(mapimg)
+
+    if qr:
+        # QR: 우측 안내 박스 위쪽 여백에 작게
+        place_image(s, qr, G.W - G.MR - 1.25, max(1.93, hb) - 0.02,
+                    1.25, 1.25, cover=False)
+        if used is not None:
+            used.add(qr)
+
+    # 우측 안내 박스 (QR이 있으면 그만큼 아래에서 시작)
+    bx = 6.67
+    by = (max(1.93, hb) + 1.42) if qr else 1.82
+    bw = 5.83
+    bh = 5.88 - by
     add_box(s, bx, by, bw, bh, fill=P["card"], line=P["line"], radius=R)
     add_text(s, bx + 0.52, by + 0.52, bw - 1.04, 0.38,
              clean(ct.get("title") or "상담 전에 알려주시면 좋아요"),
@@ -644,23 +818,24 @@ def build(data, out=None, palette=None):
     prs.slide_height = Inches(SLIDE_H)
 
     d = data or {}
-    s_cover(prs, d, P)
+    used = set()          # 이미 쓴 사진 (중복 배치 방지)
+    s_cover(prs, d, P, used)
 
     page = 2
-    plan = [s_strengths, s_philosophy, s_curriculum, s_specials,
-            s_management, s_growth, s_achievements]
+    plan = [s_philosophy, s_achievements, s_strengths, s_targets,
+            s_curriculum, s_specials, s_management, s_growth]
     for fn in plan:
-        if fn(prs, d, P, page) is not None:
+        if fn(prs, d, P, page, used) is not None:
             page += 1
 
-    made = s_timetables(prs, d, P, page)
+    made = s_timetables(prs, d, P, page, used)
     page += len(made)
 
     for fn in (s_admission, s_faq):
-        if fn(prs, d, P, page) is not None:
+        if fn(prs, d, P, page, used) is not None:
             page += 1
 
-    s_contact(prs, d, P, page)
+    s_contact(prs, d, P, page, used)
 
     if out is None:
         import io
