@@ -9,6 +9,7 @@
   * 본문 넘침 시 폰트 auto-fit(길이 기반 pt 단계 축소)
 슬라이드 크기 13.3 x 7.5 in. 서체 Pretendard(미설치 환경은 대체폰트).
 """
+import re
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -81,7 +82,47 @@ def place_image(slide, url, x, y, w, h, cover=True):
 
 SLIDE_W = 13.333
 SLIDE_H = 7.5
-FONT = "Pretendard"
+FONT = "Pretendard SemiBold"
+
+# ★한글 서체 적용: python-pptx 의 font.name 은 <a:latin> 만 채운다.
+#   한글은 <a:ea>(East Asian) 슬롯을 보므로 이걸 비워두면 테마 기본서체
+#   (Calibri, 한글 글리프 없음)로 떨어져 PowerPoint 가 맑은 고딕 등으로
+#   임의 대체한다. 세 슬롯을 모두 지정해야 지정한 서체가 실제로 나온다.
+def _apply_font(run, name=None):
+    name = name or FONT
+    run.font.name = name
+    rPr = run._r.get_or_add_rPr()
+    for tag in ("a:ea", "a:cs"):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = rPr.makeelement(qn(tag), {})
+            rPr.append(el)
+        el.set("typeface", name)
+
+
+def _force_theme_font(prs, name=None):
+    """테마 majorFont/minorFont 를 지정 서체로 바꾼다.
+    서체 지정이 누락된 텍스트가 있어도 Calibri(한글 없음)로 떨어지지 않게
+    하는 안전장치. theme1.xml 은 python-pptx 가 파싱하지 않는 일반 Part 라
+    blob 을 직접 치환한다."""
+    name = name or FONT
+    try:
+        for part in prs.part.package.iter_parts():
+            if "theme" not in str(part.partname):
+                continue
+            xml = part.blob.decode("utf-8", errors="ignore")
+            def _fix(b):
+                for slot in ("latin", "ea", "cs"):
+                    b = re.sub(r'(<a:%s[^/>]*typeface=")[^"]*(")' % slot,
+                               r"\1" + name + r"\2", b)
+                return b
+            for tag in ("majorFont", "minorFont"):
+                m = re.search(r"<a:%s>.*?</a:%s>" % (tag, tag), xml, re.S)
+                if m:
+                    xml = xml[:m.start()] + _fix(m.group(0)) + xml[m.end():]
+            part._blob = xml.encode("utf-8")
+    except Exception:
+        pass
 
 # ---------------- 팔레트 ----------------
 PALETTES = {
@@ -189,7 +230,7 @@ def txt(slide, x, y, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
     for (t, sz, b, c) in runs:
         r = p.add_run(); r.text = t
         r.font.size = Pt(sz); r.font.bold = b
-        r.font.color.rgb = _rgb(c); r.font.name = FONT
+        r.font.color.rgb = _rgb(c); _apply_font(r)
     return tb
 
 def paras(slide, x, y, w, h, plist, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
@@ -215,7 +256,7 @@ def paras(slide, x, y, w, h, plist, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
         for (t, sz, b, c) in para:
             r = p.add_run(); r.text = t
             r.font.size = Pt(sz); r.font.bold = b
-            r.font.color.rgb = _rgb(c); r.font.name = FONT
+            r.font.color.rgb = _rgb(c); _apply_font(r)
     return tb
 
 def bullets(slide, x, y, w, h, items, size=13, color=INK, dot_hex="0EA5B7",
@@ -239,9 +280,9 @@ def bullets(slide, x, y, w, h, items, size=13, color=INK, dot_hex="0EA5B7",
         pPr.set('marL', str(int(indent_in*EMU_IN)))
         pPr.set('indent', str(int(-indent_in*EMU_IN)))
         r0 = p.add_run(); r0.text = "•\t"
-        r0.font.size = Pt(size); r0.font.bold = True; r0.font.color.rgb = _rgb(dot_hex); r0.font.name = FONT
+        r0.font.size = Pt(size); r0.font.bold = True; r0.font.color.rgb = _rgb(dot_hex); _apply_font(r0)
         r1 = p.add_run(); r1.text = it
-        r1.font.size = Pt(size); r1.font.color.rgb = _rgb(color); r1.font.name = FONT
+        r1.font.size = Pt(size); r1.font.color.rgb = _rgb(color); _apply_font(r1)
     return tb
 
 
@@ -589,7 +630,7 @@ def _draw_table(s, pal, header_hex, rows, top):
         p.alignment = PP_ALIGN.LEFT if align_left else PP_ALIGN.CENTER
         run = p.add_run(); run.text = text
         run.font.size = Pt(fs); run.font.bold = bold
-        run.font.color.rgb = _rgb(color); run.font.name = FONT
+        run.font.color.rgb = _rgb(color); _apply_font(run)
 
     # 헤더
     for ci, htext in enumerate(headers):
@@ -998,6 +1039,7 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
     slide_faq(prs, pal, data)
     slide_closing(prs, pal, data)
 
+    _force_theme_font(prs)
     prs.save(out)   # out은 경로(str) 또는 file-like(BytesIO) 모두 가능
     return out
 

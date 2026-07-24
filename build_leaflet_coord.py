@@ -146,6 +146,32 @@ def _rgb(h: str) -> RGBColor:
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+_A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+
+def _set_font(run, name=None, size=None, bold=False, color=None):
+    """서체를 latin·ea·cs 세 슬롯에 모두 지정한다.
+    ★python-pptx 의 run.font.name 은 <a:latin> 만 채운다.
+      한글은 <a:ea>(East Asian) 슬롯을 보므로, 이걸 비워두면
+      테마 기본서체(Calibri)로 떨어지고 PowerPoint 가 임의의 한글 폰트
+      (맑은 고딕 등)로 대체한다 → 지정한 Pretendard 가 안 나온다."""
+    name = name or FONT
+    f = run.font
+    f.name = name
+    if size is not None:
+        f.size = Pt(size)
+    f.bold = bool(bold)
+    if color is not None:
+        f.color.rgb = _rgb(color)
+    rPr = run._r.get_or_add_rPr()
+    for tag in ("ea", "cs"):
+        el = rPr.find(_A_NS + tag)
+        if el is None:
+            el = rPr.makeelement(_A_NS + tag, {})
+            rPr.append(el)
+        el.set("typeface", name)
+
+
 def _s(v: Any, default: str = "") -> str:
     if v is None:
         return default
@@ -160,6 +186,79 @@ def _first(*vals: Any, default: str = "") -> str:
         if s:
             return s
     return default
+
+
+def _sentences(text):
+    """한국어 문장 분리. 종결부호(.!?·。) 뒤에서 끊고 부호는 살린다."""
+    s = _s(text)
+    if not s:
+        return []
+    parts = re.split(r"(?<=[.!?。])\s+", s)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_complete_sentence(x):
+    """완결된 서술문인지. 표지 카피 판정용.
+    종결어미로 끝나야 하고, 마침표만 붙은 명사형("~하는 것.")은 미완성으로 본다."""
+    x = _s(x).strip()
+    if not x:
+        return False
+    if not re.search(r"(합니다|입니다|습니다|됩니다|드립니다|십니다|해요|이에요|예요|한다|이다)[.!?]?$", x):
+        return False
+    body = re.sub(r"[.!?]$", "", x)
+    return not re.search(
+        r"(것|점|중|뿐|까지|부터|처럼|만큼|위해|통해|대한|위한|하는|되는|있는|없는)$", body)
+
+
+def _cover_copy(text, max_chars):
+    """표지 한마디 전용 필터.
+    ★완결된 문장만 남긴다. 하나도 없으면 빈 문자열(표지에서 생략).
+      미완성 조각을 표지에 올리느니 슬로건만 보여주는 편이 낫다."""
+    s = _s(text)
+    if not s:
+        return ""
+    good = [x for x in _sentences(s) if _is_complete_sentence(x)]
+    if not good:
+        return ""
+    out = good[0]
+    for nxt in good[1:]:
+        if _dwidth(out) + 1 + _dwidth(nxt) > max_chars:
+            break
+        out = out + " " + nxt
+    return out if _dwidth(out) <= max_chars * 1.35 else ""
+
+
+def _trim_sentences(text, max_chars):
+    """표시폭이 max_chars 를 넘지 않도록 <문장 단위로> 줄인다.
+    ★완결된 문장만 남긴다. 명사형으로 끝나는 조각("~하는 것.")은 버린다.
+      표지에 미완성 문장이 올라가는 것을 막기 위함(경희궁 사례).
+    - 첫 문장이 완결형이면 항상 보존한다.
+    - 단어 중간을 자르거나 '…' 를 붙이지 않는다."""
+    s = _s(text)
+    if not s:
+        return s
+    sents = _sentences(s)
+    if not sents:
+        return s
+
+    def _complete(x):
+        x = x.strip()
+        if not re.search(r"(합니다|입니다|습니다|됩니다|드립니다|십니다|해요|이에요|예요|한다|이다)[.!?]?$", x):
+            return False
+        # 마침표만 붙은 명사형 종결은 미완성으로 본다
+        body = re.sub(r"[.!?]$", "", x)
+        return not re.search(r"(것|점|중|뿐|까지|부터|처럼|만큼|위해|통해|대한|위한|하는|되는|있는|없는)$", body)
+
+    good = [x for x in sents if _complete(x)]
+    if not good:
+        # 완결 문장이 없으면 전체가 max 안에 들어갈 때만 통과, 아니면 비운다
+        return s if _dwidth(s) <= max_chars else ""
+    out = good[0]
+    for nxt in good[1:]:
+        if _dwidth(out) + 1 + _dwidth(nxt) > max_chars:
+            break
+        out = out + " " + nxt
+    return out
 
 
 def _clip(text: Any, n: int, suffix: str = "…") -> str:
@@ -207,6 +306,20 @@ def _wrap(text: str, per_line: int, max_lines: int = 0) -> str:
     limit = max(4, per_line)
     lines, cur = [], ""
     for w in s.split(" "):
+        # 한 어절이 한 줄보다 길면(예: 긴 영문 단어·URL) 어쩔 수 없이 강제로 끊는다.
+        while _dwidth(w) > limit:
+            take = ""
+            for ch in w:
+                if _dwidth(take + ch) > limit:
+                    break
+                take += ch
+            if not take:
+                break
+            if cur:
+                lines.append(cur)
+                cur = ""
+            lines.append(take)
+            w = w[len(take):]
         if cur and _dwidth(cur) + 0.5 + _dwidth(w) > limit:
             lines.append(cur)
             cur = w
@@ -215,6 +328,34 @@ def _wrap(text: str, per_line: int, max_lines: int = 0) -> str:
     if cur:
         lines.append(cur)
     return "\n".join(lines)
+
+
+def _char_w(size):
+    """1.0폭 글자(한글 1자)가 차지하는 <가로 길이(inch)>.
+    ★단위 주의: 포인트당 비율이 아니라 절대 길이를 돌려준다.
+      (이전에 비율만 돌려주다 호출부에서 size 를 곱하지 않아
+       한 줄에 233자가 들어간다고 계산되는 버그가 있었다.)
+    큰 글자일수록 자간이 상대적으로 넓어 계수를 키운다."""
+    if size >= 22:
+        return size * 0.0162
+    if size >= 17:
+        return size * 0.0155
+    return size * 0.0148
+
+
+def _fit_block(text, w_in, max_h, size, *, min_size=7.0, line_spacing=1.10,
+               pad=0.10):
+    """(size, wrapped, height) 를 돌려준다.
+    ★height 는 wrapped 를 담기에 <충분한> 값이다. max_h 로 잘라내지 않는다.
+      (예전엔 min(max_h, …) 로 깎아서, 줄 수가 max_h 를 넘길 때
+       '박스는 작은데 글자는 많은' 상태가 되어 넘침이 났다.)
+      호출부는 반환된 height 를 그대로 쓰되, max_h 를 넘겼는지 보고
+      글을 줄일지 결정한다."""
+    size, wrapped = _fit_size(text, w_in, max_h, size,
+                              min_size=min_size, line_spacing=line_spacing)
+    n = wrapped.count("\n") + 1
+    h = n * (size * line_spacing) / 72.0 + pad
+    return size, wrapped, h
 
 
 def _fit_size(text, w_in, h_in, size, *, min_size=6.5, line_spacing=1.04):
@@ -230,7 +371,7 @@ def _fit_size(text, w_in, h_in, size, *, min_size=6.5, line_spacing=1.04):
     hard = s.split("\n")
     cand = size
     while cand >= min_size:
-        per_line = max(4, int(usable_w / (cand * 0.0148)))
+        per_line = max(4, int(usable_w / _char_w(cand)))
         out, n_lines = [], 0
         for seg in hard:
             w = _wrap(seg, per_line)
@@ -240,7 +381,17 @@ def _fit_size(text, w_in, h_in, size, *, min_size=6.5, line_spacing=1.04):
         if need_h <= usable_h:
             return cand, "\n".join(out)
         cand -= 0.5
-    per_line = max(4, int(usable_w / (min_size * 0.0148)))
+    # 작성자가 넣은 줄바꿈을 지키면 안 들어가는 경우 → 줄바꿈을 풀고 다시 흘린다
+    if len(hard) > 1:
+        joined = " ".join(x.strip() for x in hard if x.strip())
+        cand = size
+        while cand >= min_size:
+            per_line = max(4, int(usable_w / _char_w(cand)))
+            w = _wrap(joined, per_line)
+            if (w.count("\n") + 1) * (cand * line_spacing) / 72.0 <= usable_h:
+                return cand, w
+            cand -= 0.5
+    per_line = max(4, int(usable_w / _char_w(min_size)))
     return min_size, "\n".join(_wrap(seg, per_line) for seg in hard)
 
 
@@ -298,11 +449,8 @@ def _text(slide, text, x, y, w, h, *, size=11, color="222222", bold=False,
         p.line_spacing = line_spacing
         r = p.add_run()
         r.text = ln
-        r.font.name = FONT
-        r.font.size = Pt(size)
         # SemiBold 단일 서체 — 인조 굵게를 걸지 않는다. 위계는 크기·색으로만 준다.
-        r.font.bold = False
-        r.font.color.rgb = _rgb(color)
+        _set_font(r, size=size, bold=False, color=color)
     if autofit:
         try:
             tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
@@ -321,8 +469,7 @@ def _chip(slide, x, y, d, number, c):
     tf.word_wrap = False
     p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
     r = p.add_run(); r.text = str(number)
-    r.font.name = FONT; r.font.size = Pt(10.5); r.font.bold = False
-    r.font.color.rgb = _rgb("FFFFFF")
+    _set_font(r, size=10.5, bold=False, color="FFFFFF")
     return sh
 
 
@@ -332,9 +479,18 @@ def _label(slide, x, text, c, dark=False, y=0.33):
           size=9, color=(c["paper"] if dark else c["label"]), bold=True)
 
 
-def _header(slide, x, text, c, dark=False, y=0.61):
-    _text(slide, text, x + LEFT, y, CW, 0.9,
-          size=19.5, color=(c["paper"] if dark else c["head"]), bold=True)
+def _header(slide, x, text, c, dark=False, y=0.61, max_h=1.30):
+    """대형 헤더. ★실제로 차지한 높이(in)를 반환한다.
+    3줄짜리 헤더가 들어오면 0.9in 박스를 넘겨 아래 subhead 와 글자가 겹쳤다
+    (경희궁 '레벨 테스트부터 반 배정까지, 네 단계로 안내합니다').
+    이제 줄 수만큼 높이를 늘려 잡고, 호출부는 반환값 아래에 다음 요소를 놓는다."""
+    size, wrapped, h = _fit_block(_s(text), CW, max_h, 19.5,
+                                  min_size=14.5, line_spacing=1.16, pad=0.10)
+    h = max(0.42, h)
+    _text(slide, wrapped, x + LEFT, y, CW, h,
+          size=size, color=(c["paper"] if dark else c["head"]), bold=True,
+          line_spacing=1.16, fit=False)
+    return y + h
 
 
 def _footer(slide, x, name, phone, c):
@@ -506,15 +662,24 @@ def _de_emoji(s):
 def _achievement_lines(schema):
     ach = schema.get("achievements") or {}
     lines = []
-    for it in _items(ach)[:6]:
+    for it in _items(ach)[:8]:
         name = _s(it.get("name") or it.get("title"))
         desc = _s(it.get("desc") or it.get("description"))
         line = " · ".join(x for x in [name, desc] if x)
         line = _de_emoji(line)
-        if line:
-            lines.append(line)
+        if not line:
+            continue
+        # ★한 항목에 실적이 통째로 뭉쳐 오는 경우가 있다(경희궁: "· 주요 실적 · 2024 KCIA…").
+        #   줄바꿈이나 ' · ' 로 이어붙은 덩어리는 항목별로 쪼개 읽기 쉽게 만든다.
+        parts = [p.strip(" ·-—") for p in re.split(r"[\n\r]+", line)]
+        if len(parts) == 1 and len(line) > 46 and line.count(" · ") >= 2:
+            parts = [p.strip() for p in line.split(" · ")]
+        for p in parts:
+            p = re.sub(r"^주요\s*실적\s*[·:]?\s*", "", p).strip(" ·-—")
+            if p:
+                lines.append(p)
     head = _s(ach.get("head") if isinstance(ach, dict) else "", "함께 이룬 결과")
-    return head, lines
+    return head, lines[:8]
 
 
 def _subject_line(schema):
@@ -538,11 +703,12 @@ def _panel_admission(slide, schema, x, c):
     admission = schema.get("admission") or {}
     _label(slide, x, _first(admission.get("label") if isinstance(admission, dict) else "",
                             default="상담 · 예약 안내"), c)
-    _header(slide, x, _first(admission.get("head") if isinstance(admission, dict) else "",
-                             default="아이에게 맞는 시작점을\n함께 찾습니다."), c)
+    hb = _header(slide, x, _first(admission.get("head") if isinstance(admission, dict) else "",
+                                  default="아이에게 맞는 시작점을\n함께 찾습니다."), c)
+    sub_y = max(1.38, hb + 0.10)          # 헤더가 3줄이어도 겹치지 않게 아래로 흐름
     _text(slide, _first(admission.get("subhead") if isinstance(admission, dict) else "",
                         default="상담 후 적합한 과정을 안내합니다."),
-          x + LEFT, 1.38, CW, 0.31, size=9.5, color=c["body"])
+          x + LEFT, sub_y, CW, 0.31, size=9.5, color=c["body"])
 
     steps = _admission_list(schema)
     if not steps:  # 최소 보장(학원 무관 일반 상담 절차 — 세원 특정 아님)
@@ -552,27 +718,35 @@ def _panel_admission(slide, schema, x, c):
             {"title": "등원 결정", "desc": "적합한 과정과 시간대를 안내합니다."},
         ]
     # ── 단계 수에 맞춰 자동 축소 ──
-    # 세로 가용구간: y=1.92 ~ 5.00(구분선 위). 3단계면 넉넉히, 5~6단계면 촘촘히.
-    Y0, Y_END = 1.92, 4.98
+    # 세로 가용구간: subhead 아래 ~ 5.00(구분선 위). 헤더가 길면 함께 내려간다.
+    Y0, Y_END = max(1.92, sub_y + 0.44), 4.98
     n = max(1, len(steps))
-    pitch = min(0.96, (Y_END - Y0) / n)          # 한 단계가 차지하는 높이
-    tight = pitch < 0.80                          # 촘촘 모드(4단계 이상)
-    t_size = 11 if pitch >= 0.86 else (10 if pitch >= 0.70 else 9.5)
-    d_size = 8.5 if pitch >= 0.86 else (8 if pitch >= 0.70 else 7.5)
-    d_lines = 2 if tight else 3
-    chip_d = CHIP if pitch >= 0.70 else 0.30
+    # 내용 길이에 맞춰 단계별 높이를 배분(고정 pitch 는 04번 설명 3줄에서 넘쳤다)
+    t_h0 = 0.29
+    need = []
+    for it in steps:
+        dl = max(1, int(_dwidth(it["desc"]) / 26) + 1) if it["desc"] else 0
+        need.append(t_h0 + dl * 0.20 + 0.14)
+    total = sum(need)
+    avail = Y_END - Y0
+    scale = min(1.0, avail / total) if total > 0 else 1.0
+    tight = scale < 0.92
+    t_size = 11 if not tight else 10
+    d_size = 8.5 if not tight else 8
+    chip_d = CHIP if not tight else 0.30
 
     y = Y0
     for i, it in enumerate(steps):
+        blk = need[i] * scale
         _chip(slide, x + LEFT, y + 0.05, chip_d, f"{i+1:02d}", c)
-        t_h = 0.27 if tight else 0.29
+        t_h = t_h0 if not tight else 0.27
         _text(slide, it["title"], x + TEXT_X, y, TEXT_W, t_h,
               size=t_size, color=c["title"], bold=True)
-        # 설명은 자르지 않고 줄바꿈으로 흡수 — 남는 높이만큼 줄 수를 허용
+        # 설명은 자르지 않고 남은 높이 전부를 준다
         _text(slide, it["desc"], x + TEXT_X, y + t_h + 0.02,
-              TEXT_W, pitch - t_h - 0.10, size=d_size, color=c["body"],
-              line_spacing=1.02)
-        y += pitch
+              TEXT_W, max(0.20, blk - t_h - 0.06), size=d_size, color=c["body"],
+              line_spacing=1.06)
+        y += blk
 
     # 구분선
     _rect(slide, x + LEFT, 5.06, CW, 0.012, fill=c["card_line"])
@@ -586,7 +760,7 @@ def _panel_admission(slide, schema, x, c):
 
 def _panel_faq(slide, schema, x, c, name):
     _label(slide, x, "자주 묻는 질문", c)
-    _header(slide, x, _first(_s((schema.get("faq") or {}).get("head")
+    hb = _header(slide, x, _first(_s((schema.get("faq") or {}).get("head")
             if isinstance(schema.get("faq"), dict) else ""), default="자주 묻는 질문"), c)
     faqs = _faq_list(schema)
     if not faqs:
@@ -597,7 +771,7 @@ def _panel_faq(slide, schema, x, c, name):
     # ── 답변 전문이 들어가도록 높이를 먼저 배분한다 ──
     # 가용 세로: 1.38 ~ 7.80(푸터 위). 질문·답변 길이에 비례해 나눠 갖고,
     # 총합이 넘치면 전체를 비례 축소한다(글자를 자르지 않는다).
-    Y0, Y_END = 1.38, 7.78
+    Y0, Y_END = max(1.38, hb + 0.14), 7.78
     blocks = []
     for i, it in enumerate(faqs):
         q = f"Q{i+1}. {it['q']}"
@@ -636,7 +810,7 @@ def _panel_cover(slide, schema, x, c, assets, pw=None):
                     (schema.get("brand") or {}).get("slogan"),
                     (schema.get("closing") or {}).get("head"),
                     default="학생의 성장을\n함께 만들어갑니다.")
-    slogan = _wrap(slogan, 13)
+    # ※미리 _wrap 하지 않는다 — 아래 _fit_slogan 이 크기와 줄바꿈을 함께 정한다.
     # 한마디: intro.promise / intro.body / intro.head / closing.cta
     promise = _first((schema.get("intro") or {}).get("promise"),
                      (schema.get("intro") or {}).get("body"),
@@ -653,15 +827,74 @@ def _panel_cover(slide, schema, x, c, assets, pw=None):
     _text(slide, name, x + 1.02, 0.39, PANEL - 1.2, 0.5,
           size=13.5, color=c["cover_ink"], bold=True, valign=MSO_ANCHOR.MIDDLE)
 
-    # 슬로건
-    _text(slide, slogan, x + 0.19, 1.35, PANEL - 0.38, 1.5,
-          size=25, color=c["cover_ink"], bold=True)
-    _text(slide, promise, x + 0.19, 2.79, PANEL - 0.38, 0.55,
-          size=10, color=c["cover_ink"])
+    # 슬로건 — 줄 수에 맞춰 높이를 잡고, 아래 요소를 그만큼 밀어낸다.
+    # (3줄 슬로건 'From Reading to Your Voice — and Beyond!' 이
+    #  1.5in 고정 박스를 넘겨 소개문·사진과 겹쳤다)
+    # 슬로건 — 표지의 주인공. 작게 줄이지 않고 3줄까지만 쓴다.
+    # 문장부호가 없어 문장 트리밍이 안 되는 경우까지 대비해,
+    # <실제로 감싼 줄 수>를 보고 어절을 하나씩 덜어낸다.
+    SL_MAX_LINES = 3
+    SL_MIN = 18
+    SL_MAX = SL_MAX_LINES * (25 * 1.18) / 72.0 + 0.12
+    sl_words = _s(slogan).replace("\n", " ").split()
 
-    # 표지 사진 자리
-    _photo_or_box(slide, (assets or {}).get("cover") or (assets or {}).get("banner"),
-                  x + 0.19, 3.44, PANEL - 0.38, 2.6, c, "학원 사진", cover_mode=True)
+    def _fit_slogan(txt):
+        return _fit_block(txt, PANEL - 0.38, SL_MAX, 25,
+                          min_size=SL_MIN, line_spacing=1.18, pad=0.12)
+
+    sl_size, sl_wrapped, sl_h = _fit_slogan(slogan)
+    while sl_wrapped.count("\n") + 1 > SL_MAX_LINES and len(sl_words) > 1:
+        sl_words.pop()
+        sl_size, sl_wrapped, sl_h = _fit_slogan(" ".join(sl_words))
+    # 어절이 하나뿐인데도 넘치면(끊을 공백이 없음) 글자 단위로 줄인다
+    if sl_wrapped.count("\n") + 1 > SL_MAX_LINES and len(sl_words) == 1:
+        one = sl_words[0]
+        while len(one) > 4 and sl_wrapped.count("\n") + 1 > SL_MAX_LINES:
+            one = one[:-2]
+            sl_size, sl_wrapped, sl_h = _fit_slogan(one)
+    sl_h = max(0.5, sl_h)
+    _text(slide, sl_wrapped, x + 0.19, 1.35, PANEL - 0.38, sl_h,
+          size=sl_size, color=c["cover_ink"], bold=True,
+          line_spacing=1.18, fit=False)
+
+    # 소개 한마디 — 표지는 "읽히는 크기"가 우선이다.
+    # ★슬로건과 크기 차이가 너무 벌어지지 않게, 슬로건의 <절반>을 기준으로 잡는다.
+    #   (25pt 슬로건 → 12.5pt 소개문. 슬로건이 줄면 소개문도 같은 비율로 준다.)
+    # ① 문장 경계에서 먼저 줄이고(첫 문장 보존) ② 그래도 넘치면 어절을 덜어낸다.
+    pr_y = 1.35 + sl_h + 0.16
+    PR_RATIO = 0.5
+    PR_BASE = round(sl_size * PR_RATIO * 2) / 2.0        # 0.5pt 단위
+    PR_MIN = max(9.5, round(SL_MIN * PR_RATIO * 2) / 2.0)
+    PR_MAX_LINES = 3
+    per_line = max(8, int((PANEL - 0.38 - 0.10) / _char_w(PR_BASE)))
+    # ★표지에는 완결된 문장만 올린다. 길이와 무관하게 조각은 제외.
+    promise = _cover_copy(promise, per_line * PR_MAX_LINES)
+    pr_max_h = PR_MAX_LINES * (PR_BASE * 1.16) / 72.0 + 0.10
+
+    def _fit_promise(txt):
+        return _fit_block(txt, PANEL - 0.38, pr_max_h, PR_BASE,
+                          min_size=PR_MIN, line_spacing=1.16, pad=0.10)
+
+    pr_size, pr_wrapped, pr_h = _fit_promise(promise)
+    # 넘치면 <문장 단위로> 덜어낸다(어절을 잘라 미완성 문장을 만들지 않는다)
+    _pr_sents = _sentences(pr_wrapped.replace("\n", " "))
+    while pr_wrapped.count("\n") + 1 > PR_MAX_LINES and len(_pr_sents) > 1:
+        _pr_sents.pop()
+        pr_size, pr_wrapped, pr_h = _fit_promise(" ".join(_pr_sents))
+    # 한 문장인데도 3줄을 넘으면 표지에서 뺀다(잘린 문장을 올리지 않는다)
+    if pr_wrapped.count("\n") + 1 > PR_MAX_LINES:
+        pr_wrapped, pr_h = "", 0.0
+    pr_h = max(0.0, pr_h)
+    if pr_wrapped:
+        _text(slide, pr_wrapped, x + 0.19, pr_y, PANEL - 0.38, pr_h,
+              size=pr_size, color=c["cover_ink"], line_spacing=1.16, fit=False)
+
+    # 표지 사진 자리 — 소개문 아래에서 시작(겹침 방지). 공간이 부족하면 생략.
+    ph_y = pr_y + pr_h + 0.14
+    ph_h = 6.04 - ph_y
+    if ph_h >= 1.10:
+        _photo_or_box(slide, (assets or {}).get("cover") or (assets or {}).get("banner"),
+                      x + 0.19, ph_y, PANEL - 0.38, ph_h, c, "학원 사진", cover_mode=True)
 
     # 과목·학년 뱃지
     subj = _subject_line(schema)
@@ -687,20 +920,31 @@ def _panel_features(slide, schema, x, c, name):
     _label(slide, x, f"WHY {name}"[:18] if False else "우리 학원의 강점", c)
     feats = _feature_list(schema)
     head = f"성장을 만드는\n{len(feats)}가지 학습 원칙" if len(feats) >= 2 else "우리 학원의\n학습 원칙"
-    _header(slide, x, _first((schema.get("features_head")), default=head), c)
-    Y0, Y_END = 1.54, 7.80
-    n = max(1, len(feats))
-    pitch = min(0.92, (Y_END - Y0) / n)
-    t_h = 0.35 if pitch >= 0.85 else 0.30
-    t_size = 12 if pitch >= 0.85 else 11
+    hb = _header(slide, x, _first((schema.get("features_head")), default=head), c)
+    Y0, Y_END = max(1.54, hb + 0.14), 7.80
+    # 제목이 2줄 되는 항목이 있으므로(예: '1:1 레벨 진단 및 성장 경로 설계')
+    # 항목마다 필요한 높이를 재서 배분한다.
+    need = []
+    for it in feats:
+        tl = max(1, int(_dwidth(it["title"]) / 19) + 1)
+        dl = max(1, int(_dwidth(it["desc"]) / 26) + 1) if it["desc"] else 0
+        need.append(tl * 0.26 + dl * 0.20 + 0.20)
+    total = sum(need)
+    avail = Y_END - Y0
+    scale = min(1.0, avail / total) if total > 0 else 1.0
+    t_size = 12 if scale >= 0.92 else 11
     y = Y0
     for i, it in enumerate(feats):
+        blk = need[i] * scale
+        tl = max(1, int(_dwidth(it["title"]) / 19) + 1)
+        t_h = max(0.26, tl * 0.26 * scale)
         _chip(slide, x + LEFT, y, CHIP, f"{i+1:02d}", c)
         _text(slide, it["title"], x + TEXT_X, y, TEXT_W, t_h,
-              size=t_size, color=c["title"], bold=True)
+              size=t_size, color=c["title"], bold=True, line_spacing=1.08)
         _text(slide, it["desc"], x + TEXT_X, y + t_h + 0.03, TEXT_W,
-              pitch - t_h - 0.10, size=8.5, color=c["body"])
-        y += pitch
+              max(0.20, blk - t_h - 0.09), size=8.5, color=c["body"],
+              line_spacing=1.06)
+        y += blk
 
 
 def _panel_curriculum(slide, schema, x, c):
@@ -709,10 +953,10 @@ def _panel_curriculum(slide, schema, x, c):
         # 커리큘럼 없으면 패널 라벨·헤더 자체를 안 그림(빈 잔존 없음)
         return
     _label(slide, x, "교육 과정", c)
-    _header(slide, x, _first(_s((schema.get("curriculum") or {}).get("head")),
-                             default="단계별로 이어지는\n학습 과정"), c)
-    y = 1.73
+    hb = _header(slide, x, _first(_s((schema.get("curriculum") or {}).get("head")),
+                                  default="단계별로 이어지는\n학습 과정"), c)
     cin = 0.18  # 카드 내부 여백
+    y = max(1.73, hb + 0.20)
     # 카드 높이를 내용 길이로 산출하고, 넘치면 비례 축소(글자 안 자름)
     # 아래에 특별 프로그램 블록이 붙으면 그 위에서 멈춘다.
     _has_sp = bool(_items(schema.get("specials")))
@@ -723,7 +967,9 @@ def _panel_curriculum(slide, schema, x, c):
         d_lines = max(1, int(_dwidth(it.get("desc") or "") / 20) + 1) if it.get("desc") else 0
         t_lines = max(1, int(_dwidth(it.get("detail") or "") / 24) + 1) if it.get("detail") else 0
         h = 0.56 + d_lines * 0.24 + t_lines * 0.20 + 0.16
-        plan.append({"it": it, "h": max(1.05, h), "d": d_lines, "t": t_lines})
+        # ★1.05in 최소높이를 두면 내용 2줄짜리 초등 카드가 과하게 커져
+        #   중등 카드와 균형이 깨졌다(경희궁). 내용만큼만 준다.
+        plan.append({"it": it, "h": max(0.82, h), "d": d_lines, "t": t_lines})
     GAP = 0.35
     total = sum(p["h"] for p in plan) + GAP * max(0, len(plan) - 1)
     avail = Y_END - y
@@ -770,15 +1016,16 @@ def _panel_curriculum(slide, schema, x, c):
 def _panel_management(slide, schema, x, c):
     steps = _mgmt_list(schema)
     _label(slide, x, "학습 관리", c)
-    _header(slide, x, _first(_s((schema.get("management") or {}).get("head")),
-                             default="진도보다 이해를\n먼저 확인합니다."), c)
+    hb = _header(slide, x, _first(_s((schema.get("management") or {}).get("head")),
+                                  default="진도보다 이해를\n먼저 확인합니다."), c)
+    sub_y = max(1.48, hb + 0.10)
     if steps:
         _text(slide, _first(_s((schema.get("management") or {}).get("subhead")),
                             default=f"학습 관리 {len(steps)} STEP"),
-              x + LEFT, 1.48, CW, 0.27, size=9.5, color=c["body"], bold=True)
+              x + LEFT, sub_y, CW, 0.27, size=9.5, color=c["body"], bold=True)
     # 카드 높이를 내용 길이로 산출(고정 0.82in 이 길면 잘렸다).
     # 실적 블록이 아래에 붙으므로 그 위까지만 쓰고 여유를 둔다.
-    Y0 = 1.95
+    Y0 = max(1.95, sub_y + 0.42)
     has_ach = bool(_achievement_lines(schema)[1])
     Y_END = 5.72 if has_ach else 7.80
     plan = []
@@ -817,8 +1064,8 @@ def _panel_achievements(slide, schema, x, c):
     """실적 단독 패널. 앞 섹션이 비어 면이 남을 때 승격되어 들어온다."""
     head, lines = _achievement_lines(schema)
     _label(slide, x, "주요 실적", c)
-    _header(slide, x, _first(head, default="숫자로 남은\n결과입니다."), c)
-    y = 1.95
+    hb = _header(slide, x, _first(head, default="숫자로 남은\n결과입니다."), c)
+    y = max(1.95, hb + 0.18)
     for ln in lines[:6]:
         _rect(slide, x + LEFT, y, CW, 0.62, fill=c["soft"], radius=True)
         _text(slide, ln, x + LEFT + 0.15, y, CW - 0.3, 0.62,
@@ -830,8 +1077,8 @@ def _panel_rules(slide, schema, x, c):
     """학원 규정 패널(예비)."""
     rules = _items(schema.get("rules")) or _items(schema.get("policy"))
     _label(slide, x, "학원 안내", c)
-    _header(slide, x, "함께 지키는\n약속입니다.", c)
-    y = 1.95
+    hb = _header(slide, x, "함께 지키는\n약속입니다.", c)
+    y = max(1.95, hb + 0.18)
     for it in rules[:6]:
         k = _s(it.get("k") or it.get("title") or it.get("name"))
         v = _s(it.get("v") or it.get("desc") or it.get("body"))
@@ -849,9 +1096,9 @@ def _panel_specials(slide, schema, x, c):
     """특별 프로그램 단독 패널(예비)."""
     sp = _items(schema.get("specials"))
     _label(slide, x, "특별 프로그램", c)
-    _header(slide, x, _first(_s((schema.get("specials") or {}).get("head")),
-                             default="정규 수업 밖에서\n더 채웁니다."), c)
-    y = 1.95
+    hb = _header(slide, x, _first(_s((schema.get("specials") or {}).get("head")),
+                                  default="정규 수업 밖에서\n더 채웁니다."), c)
+    y = max(1.95, hb + 0.18)
     for i, it in enumerate(sp[:5]):
         t = _s(it.get("title") or it.get("name"))
         d = _s(it.get("desc") or it.get("description"))
@@ -916,8 +1163,8 @@ def _panel_combo(slide, schema, x, c, parts):
     섹션이 3~4개일 때 안쪽면(3면)을 못 채워 콘텐츠를 버리는 것을 막는다.
     각 파트를 [소제목 + 줄목록]으로 압축해 세로로 쌓고, 남는 높이에 맞춘다."""
     _label(slide, x, "한눈에 보기", c)
-    _header(slide, x, "학원 안내", c)
-    Y0, Y_END = 1.54, 7.80
+    hb = _header(slide, x, "학원 안내", c)
+    Y0, Y_END = max(1.54, hb + 0.14), 7.80
     blocks = []
     for title, lines in parts:
         lines = [l for l in lines if _s(l)]
@@ -977,6 +1224,37 @@ def _combo_parts(schema, keys):
 
 
 # ── 빌드 ──────────────────────────────────────────────
+def _force_theme_font(prs, name=FONT):
+    """테마의 majorFont/minorFont 를 지정 서체로 바꾼다.
+    기본 테마는 Calibri(한글 글리프 없음)라서, 혹시 서체 지정이 누락된
+    텍스트가 있으면 PowerPoint 가 임의의 한글 폰트로 대체해 버린다.
+    테마까지 맞춰두면 그런 경우에도 Pretendard 로 떨어진다.
+    ※theme1.xml 은 python-pptx 가 파싱하지 않는 일반 Part 라서
+      blob(바이트)을 직접 치환한다."""
+    try:
+        for part in prs.part.package.iter_parts():
+            if "theme" not in str(part.partname):
+                continue
+            xml = part.blob.decode("utf-8", errors="ignore")
+
+            def _fix(block):
+                block = re.sub(r'(<a:latin[^/>]*typeface=")[^"]*(")',
+                               r"\1" + name + r"\2", block)
+                block = re.sub(r'(<a:ea[^/>]*typeface=")[^"]*(")',
+                               r"\1" + name + r"\2", block)
+                block = re.sub(r'(<a:cs[^/>]*typeface=")[^"]*(")',
+                               r"\1" + name + r"\2", block)
+                return block
+
+            for tag in ("majorFont", "minorFont"):
+                m = re.search(r"<a:%s>.*?</a:%s>" % (tag, tag), xml, re.S)
+                if m:
+                    xml = xml[:m.start()] + _fix(m.group(0)) + xml[m.end():]
+            part._blob = xml.encode("utf-8")
+    except Exception:
+        pass  # 테마 수정 실패는 치명적이지 않다(런 단위 지정이 이미 있음)
+
+
 def build(schema: Dict[str, Any], palette: str = "sewon_teal",
           out: Union[str, os.PathLike, io.BytesIO, None] = None,
           assets: Optional[Dict[str, str]] = None):
@@ -1064,6 +1342,7 @@ def build(schema: Dict[str, Any], palette: str = "sewon_teal",
             _rect(s2, gx, 0, 0.008, H_IN, fill=c["card_line"])
             _draw(s2, outer_secs + 2, gx)
 
+    _force_theme_font(prs, FONT)
     prs.core_properties.title = f"{name} 3단 리플렛"
     prs.core_properties.subject = "YouMeanI coordinate leaflet"
 

@@ -14,6 +14,7 @@
   푸터: 좌(학원명) / 우(슬로건 or 날짜)
 배경 흰색 #f4f5f7.
 """
+import re
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -31,8 +32,48 @@ from build_brandbook_v3 import (
 
 SLIDE_W = 13.333
 SLIDE_H = 7.5
-FONT = "Pretendard"
+FONT = "Pretendard SemiBold"
+
+# ★한글 서체 적용: python-pptx 의 font.name 은 <a:latin> 만 채운다.
+#   한글은 <a:ea>(East Asian) 슬롯을 보므로 이걸 비워두면 테마 기본서체
+#   (Calibri, 한글 글리프 없음)로 떨어져 PowerPoint 가 맑은 고딕 등으로
+#   임의 대체한다. 세 슬롯을 모두 지정해야 지정한 서체가 실제로 나온다.
+def _apply_font(run, name=None):
+    name = name or FONT
+    run.font.name = name
+    rPr = run._r.get_or_add_rPr()
+    for tag in ("a:ea", "a:cs"):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = rPr.makeelement(qn(tag), {})
+            rPr.append(el)
+        el.set("typeface", name)
 EMU_IN = 914400
+
+
+def _force_theme_font(prs, name=None):
+    """테마 majorFont/minorFont 를 지정 서체로 바꾼다.
+    서체 지정이 누락된 텍스트가 있어도 Calibri(한글 없음)로 떨어지지 않게
+    하는 안전장치. theme1.xml 은 python-pptx 가 파싱하지 않는 일반 Part 라
+    blob 을 직접 치환한다."""
+    name = name or FONT
+    try:
+        for part in prs.part.package.iter_parts():
+            if "theme" not in str(part.partname):
+                continue
+            xml = part.blob.decode("utf-8", errors="ignore")
+            def _fix(b):
+                for slot in ("latin", "ea", "cs"):
+                    b = re.sub(r'(<a:%s[^/>]*typeface=")[^"]*(")' % slot,
+                               r"\1" + name + r"\2", b)
+                return b
+            for tag in ("majorFont", "minorFont"):
+                m = re.search(r"<a:%s>.*?</a:%s>" % (tag, tag), xml, re.S)
+                if m:
+                    xml = xml[:m.start()] + _fix(m.group(0)) + xml[m.end():]
+            part._blob = xml.encode("utf-8")
+    except Exception:
+        pass
 
 # ---------------- book 팔레트 (v3 3종에 매핑) ----------------
 # teal_blue: 청록 주 + 블루 보조 (원형 호는 이 두 색만)
@@ -856,7 +897,7 @@ def _draw_table_book(s, header_hex, rows):
         tf=cell.text_frame; tf.word_wrap=True
         p=tf.paragraphs[0]; p.alignment=PP_ALIGN.LEFT if left else PP_ALIGN.CENTER
         r=p.add_run(); r.text=text; r.font.size=Pt(fs); r.font.bold=bold
-        r.font.color.rgb=_rgb(color); r.font.name=FONT
+        r.font.color.rgb=_rgb(color); _apply_font(r)
     for ci,h in enumerate(headers):
         _cell(tbl.cell(0,ci), h, 13, True, "FFFFFF", header_hex)
     for ri,row in enumerate(rows):
@@ -1008,6 +1049,7 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
     # 16 마무리 (사분면/연락)
     s16_closing(prs, pal, data)
 
+    _force_theme_font(prs)
     prs.save(out)
     return out
 
