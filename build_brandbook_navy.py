@@ -21,6 +21,7 @@ from navy_core import (
     _rgb, _latin_font, FONT,
     G, FS, get_palette, blank_slide, page_head, add_box, add_text, add_pill,
     place_image, clean, fit_size, gv, as_dicts, nonempty, wrap_words,
+    force_theme_font,
 )
 
 SLIDE_W = 13.333
@@ -167,7 +168,7 @@ def s_strengths(prs, d, P, page, used=None):
     items = items[:6]
     s = blank_slide(prs)
     hb = page_head(s, P,
-              "THE STRENGTHS",
+              "핵심 강점",
               gv(d, "identity", "headline") or "우리 학원이 만드는 변화",
               gv(d, "identity", "lead"),
               page)
@@ -214,7 +215,7 @@ def s_philosophy(prs, d, P, page, used=None):
     if not points and not intro:
         return None
     s = blank_slide(prs)
-    hb = page_head(s, P, "ABOUT",
+    hb = page_head(s, P, "학원 소개",
               clean(ph.get("headline") or "공부하는 방법이 결과를 만듭니다"),
               None, page)
 
@@ -281,7 +282,7 @@ def s_targets(prs, d, P, page, used=None):
         return None
     items = items[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "CLASSES",
+    hb = page_head(s, P, "수업 대상",
                    clean(d.get("targetsHead") or "학년별 수업 대상"),
                    "학년과 과목에 맞춰 반을 나누어 운영합니다.", page)
 
@@ -330,7 +331,7 @@ def s_curriculum(prs, d, P, page, used=None):
         return None
     stages = stages[:3]
     s = blank_slide(prs)
-    hb = page_head(s, P, "CURRICULUM",
+    hb = page_head(s, P, "교육 과정",
               "학년별 진도와 수업 방식은 한 흐름 안에서 설계합니다",
               gv(d, "curriculumLead") or
               "현재 수준에 맞춰 다음 단계까지 자연스럽게 연결합니다.",
@@ -383,7 +384,7 @@ def s_specials(prs, d, P, page, used=None):
         return None
     items = items[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "SPECIAL PROGRAMS",
+    hb = page_head(s, P, "특별 프로그램",
               "수업 밖의 시간도 공부하는 힘으로 바꿉니다", None, page)
 
     colw, rowh = 6.15, 2.13
@@ -413,7 +414,7 @@ def s_management(prs, d, P, page, used=None):
         return None
     items = items[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "LEARNING MANAGEMENT",
+    hb = page_head(s, P, "학습 관리",
               "작은 빈틈을 제때 채워야 어려워지지 않습니다",
               "수업과 가정이 같은 정보를 보고, 필요한 시점에 학습 방향을 조정합니다.",
               page)
@@ -443,7 +444,7 @@ def s_growth(prs, d, P, page, used=None):
         return None
     steps = steps[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "GROWTH PATH",
+    hb = page_head(s, P, "성장 로드맵",
               "지금의 공부 습관이 다음 단계의 경쟁력으로 이어집니다",
               gv(d, "growthLead"), page)
 
@@ -484,7 +485,7 @@ def s_achievements(prs, d, P, page, used=None):
         return None
     items = items[:3]
     s = blank_slide(prs)
-    hb = page_head(s, P, "RESULTS",
+    hb = page_head(s, P, "주요 실적",
               clean(gv(d, "achievementsHead") or "숫자로 확인하는 학습의 결과"),
               gv(d, "achievementsLead"), page)
 
@@ -594,7 +595,7 @@ def s_timetables(prs, d, P, page, used=None):
     pairs = [units[i:i + 2] for i in range(0, len(units), 2)]
     for ci, pair in enumerate(pairs):
         s = blank_slide(prs)
-        hb = page_head(s, P, "CLASS SCHEDULE",
+        hb = page_head(s, P, "수업 시간표",
                        "수업 시간표" if len(pairs) == 1
                        else f"수업 시간표 ({ci+1})",
                        "반 편성과 시간표는 학기별로 조정될 수 있으니 "
@@ -657,7 +658,7 @@ def s_admission(prs, d, P, page, used=None):
         return None
     steps = steps[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "ADMISSION",
+    hb = page_head(s, P, "입학 안내",
               "처음 한 걸음부터 학원이 함께 안내합니다", None, page)
 
     n = len(steps)
@@ -696,7 +697,7 @@ def s_faq(prs, d, P, page, used=None):
         return None
     items = items[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "FAQ",
+    hb = page_head(s, P, "자주 묻는 질문",
               "등록 전에 가장 많이 물어보시는 내용을 정리했습니다", None, page)
 
     cw, ch, gx, gy = 5.62, 1.79, 6.15, 2.13
@@ -731,7 +732,7 @@ def s_contact(prs, d, P, page, used=None):
     s = blank_slide(prs)
     b = d.get("basic", {})
     ct = d.get("contact") or {}
-    hb = page_head(s, P, "CONTACT",
+    hb = page_head(s, P, "등록 문의",
               clean(ct.get("headline") or b.get("slogan") or "상담을 기다리고 있습니다"),
               None, page)
 
@@ -837,6 +838,7 @@ def build(data, out=None, palette=None):
 
     s_contact(prs, d, P, page, used)
 
+    force_theme_font(prs)
     if out is None:
         import io
         bio = io.BytesIO()

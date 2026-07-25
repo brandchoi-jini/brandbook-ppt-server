@@ -15,7 +15,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from build_brandbook_navy import _style_table, _set_cell
 from navy_core import (
     FS, get_palette, blank_slide, add_box, add_text, add_pill,
-    place_image, clean, fit_size, gv, as_dicts, wrap_words,
+    place_image, clean, fit_size, gv, as_dicts, wrap_words, force_theme_font,
 )
 
 SW, SH = 8.27, 11.69
@@ -25,8 +25,8 @@ R = 0.055                 # 공통 라운드 반경
 
 
 def head(s, P, eyebrow, title, lead=None, y=0.72):
-    add_text(s, ML, y, CW, 0.2, eyebrow.upper(), size=FS.eyebrow, bold=True,
-             color=P["primary"], line_spacing=1.0)
+    add_text(s, ML, y, CW, 0.2, clean(eyebrow), size=FS.eyebrow, bold=True,
+             color=P["primary"], line_spacing=1.0, clip=False)
     lines = wrap_words(clean(title), 22)[:2]
     size = 19.5 if len(lines) == 1 else 17.25
     h = len(lines) * size * 1.28 / 72.0 + 0.06
@@ -108,7 +108,7 @@ def c_philosophy(prs, d, P, page):
     if not (pts or strengths or intro):
         return None
     s = blank_slide(prs)
-    y = head(s, P, "ABOUT",
+    y = head(s, P, "학원 소개",
              clean(ph.get("headline") or gv(d, "identity", "headline")
                    or "공부하는 방법이 결과를 만듭니다"),
              intro)
@@ -158,7 +158,7 @@ def c_curriculum(prs, d, P, page):
     if not stages:
         return None
     s = blank_slide(prs)
-    y = head(s, P, "CURRICULUM", "학년별 학습 설계",
+    y = head(s, P, "교육 과정", "학년별 학습 설계",
              d.get("curriculumLead") or
              "현재 수준에서 시작해 다음 단계까지 이어지도록 설계합니다.")
 
@@ -337,7 +337,7 @@ def c_admission(prs, d, P, page):
     if not (steps or faq):
         return None
     s = blank_slide(prs)
-    y = head(s, P, "ADMISSION", "등록 안내",
+    y = head(s, P, "입학 안내", "등록 안내",
              clean(d.get("admissionNote") or ""))
 
     if steps:
@@ -417,6 +417,7 @@ def build(data, out=None, palette=None):
         if fn(prs, d, P, page) is not None:
             page += 1
 
+    force_theme_font(prs)
     if out is None:
         import io
         bio = io.BytesIO()

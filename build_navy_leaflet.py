@@ -15,7 +15,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from navy_core import (
     FS, get_palette, blank_slide, add_box, add_text, add_pill,
-    place_image, clean, fit_size, gv, as_dicts, wrap_words,
+    place_image, clean, fit_size, gv, as_dicts, wrap_words, force_theme_font,
 )
 
 PW = 4.133          # 패널 폭
@@ -36,14 +36,18 @@ def divider(s, P):
         add_box(s, PW * i - 0.005, 0, 0.01, SH, fill=P["line"])
 
 
-def head(s, P, x, eyebrow, title_lines, y=0.36):
-    """패널 헤더. 줄 수에 맞춰 박스 높이를 늘리고, 3줄이 되면 크기를 줄인다."""
+def head(s, P, x, label, title_lines, y=0.36):
+    """패널 헤더. label 은 한글 섹션 라벨(작게·회색).
+    ★영문 아이브로 금지 원칙에 따라 .upper() 폐기 — 한글 라벨을 그대로 쓴다.
+    줄 수에 맞춰 박스 높이를 늘리고, 3줄이 되면 크기를 줄인다."""
     if isinstance(title_lines, str):
         title_lines = [title_lines]
     title_lines = [clean(t) for t in title_lines if clean(t)]
 
-    add_text(s, x, y, CW, 0.19, eyebrow.upper(), size=FS.eyebrow, bold=True,
-             color=P["primary"], line_spacing=1.0)
+    label = clean(label)
+    if label:
+        add_text(s, x, y, CW, 0.19, label, size=FS.eyebrow, bold=True,
+                 color=P["primary"], line_spacing=1.0, clip=False)
 
     size = 17.25
     if len(title_lines) > 2 or any(len(t) > 16 for t in title_lines):
@@ -52,7 +56,7 @@ def head(s, P, x, eyebrow, title_lines, y=0.36):
         size = 13.5
     h = max(0.54, len(title_lines) * size * 1.3 / 72.0 + 0.06)
     add_text(s, x, y + 0.25, CW, h, title_lines, size=size, bold=True,
-             color=P["text"], line_spacing=1.3)
+             color=P["text"], line_spacing=1.3, clip=False)
     return y + 0.25 + h
 
 
@@ -62,16 +66,29 @@ def p_faq(s, d, P, x):
     items = [i for i in items if clean(i.get("q") or i.get("question"))][:4]
     if not items:
         return False
-    head(s, P, x, "FAQ", ["등록 전에", "많이 물어보세요"])
-    y = 1.61
+    hb = head(s, P, x, "자주 묻는 질문", ["등록 전에", "많이 물어보세요"])
+    # 답변 길이에 맞춰 세로로 배분하고, 넘치면 전체를 비례 축소(자르지 않음)
+    Y0, Y_END = max(1.61, hb + 0.24), SH - 0.4
+    blocks = []
     for it in items:
         q = clean(it.get("q") or it.get("question") or "")
         a = clean(it.get("a") or it.get("answer") or "")
-        add_text(s, x, y, CW, 0.36, "Q. " + q, size=FS.body,
-                 bold=True, color=P["text"], line_spacing=1.3)
-        add_text(s, x, y + 0.42, CW, 0.57, "A. " + a, size=FS.body_sm,
-                 color=P["muted"], line_spacing=1.45)
-        y += 1.37
+        q_lines = max(1, -(-len("Q. " + q) // 24))
+        a_lines = max(1, -(-len("A. " + a) // 26))
+        blocks.append({"q": "Q. " + q, "a": "A. " + a,
+                       "qh": 0.30 * q_lines, "ah": 0.24 * a_lines})
+    GAP = 0.30
+    total = sum(b["qh"] + 0.10 + b["ah"] for b in blocks) + GAP * (len(blocks) - 1)
+    scale = min(1.0, (Y_END - Y0) / total) if total > 0 else 1.0
+    gap = GAP * scale
+    y = Y0
+    for b in blocks:
+        qh, ah = b["qh"] * scale, b["ah"] * scale
+        add_text(s, x, y, CW, qh + 0.06, b["q"], size=FS.body,
+                 bold=True, color=P["text"], line_spacing=1.3, clip=False)
+        add_text(s, x, y + qh + 0.06, CW, ah + 0.06, b["a"], size=FS.body_sm,
+                 color=P["muted"], line_spacing=1.4, clip=False, min_size=8.0)
+        y += qh + 0.10 + ah + gap
     return True
 
 
@@ -79,7 +96,7 @@ def p_faq(s, d, P, x):
 def p_admission(s, d, P, x):
     steps = as_dicts(d.get("admission"))[:4]
     b = d.get("basic", {})
-    head(s, P, x, "ADMISSION", ["입학 안내"])
+    head(s, P, x, "입학 안내", ["등록은", "이렇게 진행됩니다"])
     y = 1.41
     for i, st in enumerate(steps):
         add_pill(s, x, y, 0.5, 0.29, f"{i+1:02d}", fill=P["primary"],
@@ -165,7 +182,7 @@ def p_philosophy(s, d, P, x):
     intro = clean(ph.get("intro") or gv(d, "identity", "intro") or "")
     if not pts and not intro:
         return False
-    hb = head(s, P, x, "ABOUT", wrap_words(
+    hb = head(s, P, x, "학원 소개", wrap_words(
         clean(ph.get("headline") or "공부하는 방법이 결과를 만듭니다"), 13)[:3])
     y = hb + 0.28
     if intro:
@@ -196,7 +213,7 @@ def p_curriculum(s, d, P, x):
     stages = as_dicts(d.get("curriculum"), "name")[:3]
     if not stages:
         return False
-    head(s, P, x, "CURRICULUM", ["단계별 학습 설계"])
+    head(s, P, x, "교육 과정", ["단계별", "학습 설계"])
     y = 1.55
     for st in stages:
         add_box(s, x, y, CW, 1.95, fill=P["card"], line=P["line"], radius=R)
@@ -231,7 +248,7 @@ def p_management(s, d, P, x):
             it.setdefault("key", clean(it.get("title", ""))[:4])
     if not items:
         return False
-    head(s, P, x, "LEARNING MANAGEMENT", ["매 수업, 확인하고", "채워갑니다"])
+    head(s, P, x, "학습 관리", ["매 수업 확인하고", "채워갑니다"])
     y = 1.75
     for it in items:
         key = clean(it.get("key") or it.get("title") or "")
@@ -267,6 +284,7 @@ def build(data, out=None, palette=None):
     p_curriculum(s2, d, P, panel_x(1))
     p_management(s2, d, P, panel_x(2))
 
+    force_theme_font(prs)
     if out is None:
         import io
         bio = io.BytesIO()

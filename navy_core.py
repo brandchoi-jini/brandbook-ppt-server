@@ -17,7 +17,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.oxml.ns import qn
 
-FONT = "Pretendard"
+FONT = "Pretendard SemiBold"
 
 # ── 팔레트 (기준점 실측값) ────────────────────────────────────────────
 PALETTES = {
@@ -301,10 +301,11 @@ def wrap_words(text, max_chars):
 
 # ── 페이지 공통 요소 ─────────────────────────────────────────────────
 def page_head(slide, P, eyebrow, header, lead=None, page_no=None):
-    """아이브로(영문) → 헤더 → 리드 3단 + 우하단 페이지번호.
+    """섹션 라벨(한글, 작게·회색) → 헤더 → 리드 3단 + 우하단 페이지번호.
+    ★영문 아이브로 금지 원칙 — .upper() 폐기, 한글 라벨을 그대로 쓴다.
     반환값: 콘텐츠 시작 가능 y (헤더가 2줄이면 그만큼 내려간다)."""
     if eyebrow:
-        add_text(slide, G.ML, G.y_eyebrow, 5.0, 0.25, eyebrow.upper(),
+        add_text(slide, G.ML, G.y_eyebrow, 5.0, 0.25, clean(eyebrow),
                  size=FS.eyebrow, bold=True, color=P["primary"],
                  line_spacing=1.0, shrink=False, clip=False)
 
@@ -338,6 +339,33 @@ def page_head(slide, P, eyebrow, header, lead=None, page_no=None):
 
 def blank_slide(prs):
     return prs.slides.add_slide(prs.slide_layouts[6])
+
+
+def force_theme_font(prs, name=None):
+    """테마 majorFont/minorFont 를 지정 서체로 바꾼다.
+    서체 지정이 누락된 텍스트가 있어도 Calibri(한글 글리프 없음)로
+    떨어지지 않게 하는 안전장치. theme1.xml 은 python-pptx 가 파싱하지
+    않는 일반 Part 라 blob 을 직접 치환한다."""
+    name = name or FONT
+    try:
+        for part in prs.part.package.iter_parts():
+            if "theme" not in str(part.partname):
+                continue
+            xml = part.blob.decode("utf-8", errors="ignore")
+
+            def _fix(b):
+                for slot in ("latin", "ea", "cs"):
+                    b = re.sub(r'(<a:%s[^/>]*typeface=")[^"]*(")' % slot,
+                               r"\1" + name + r"\2", b)
+                return b
+
+            for tag in ("majorFont", "minorFont"):
+                m = re.search(r"<a:%s>.*?</a:%s>" % (tag, tag), xml, re.S)
+                if m:
+                    xml = xml[:m.start()] + _fix(m.group(0)) + xml[m.end():]
+            part._blob = xml.encode("utf-8")
+    except Exception:
+        pass
 
 
 # ── 이미지 로딩 (URL / base64 data URL / 경로 / bytes) ───────────────
