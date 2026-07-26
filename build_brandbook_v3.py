@@ -465,7 +465,7 @@ def slide_features(prs, pal, d):
     if not feats: return None
     s = new_slide(prs)
     label(s, pal, "교육 방향")
-    header(s, (d.get("intro") or {}).get("feat_head","") or "", size=26)
+    header(s, d.get("feat_head","") or "", size=26)
     n = len(feats)
     ncol = 3 if n >= 3 else n
     nrow = (n+ncol-1)//ncol
@@ -475,7 +475,9 @@ def slide_features(prs, pal, d):
     gh = min(2.3, (7.05-top-0.24*(nrow-1))/max(nrow,1))
     for i, f in enumerate(feats):
         r = i//ncol; c = i%ncol
-        x = PADX + c*(gw+gap); y = top + r*(gh+0.24)
+        in_row = min(ncol, n - r*ncol)              # 이 줄에 실제로 놓이는 개수
+        off = ((ncol-in_row)*(gw+gap))/2            # 덜 찬 줄은 가운데로
+        x = PADX + off + c*(gw+gap); y = top + r*(gh+0.24)
         rect(s, x, y, gw, gh, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
         title = str(f.get("title",""))
         pw = min(gw-0.4, 0.5 + _disp_width(title)*0.21)
