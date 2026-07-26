@@ -694,9 +694,9 @@ def s_quad(prs, pal, d, label_text, head, summary, items):
     return s
 
 
-# 12) 진단 회색 행 (회색 헤더바 + 화살표 + 설명) — 매트릭스 클리닉 / 과목별 관리
+# 12) 진단 회색 행 (회색 헤더바 + 화살표 + 설명) — 매트릭스 클리닉 / 수업 관리
 def s_diagrows(prs, pal, d, label_text, head, summary, cols, style="auto"):
-    """과목별 관리. style: auto(과목 1개면 box, 2개면 row) / row(줄 타입) / box(박스 타입)"""
+    """수업 관리. style: auto(과목 1개면 box, 2개면 row) / row(줄 타입) / box(박스 타입)"""
     s = _new(prs)
     _frame(s, pal, d)
     _left(s, pal, label_text, head, summary)
@@ -1015,7 +1015,7 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
                "우리를 만드는\n네 가지 축",
                "학원의 핵심 강점을 정리했습니다",
                [{"title":f.get("title",""),"desc":f.get("desc","")} for f in feats[:4]])
-    # 12 매트릭스 클리닉 (진단 회색행) — 과목별 관리
+    # 12 매트릭스 클리닉 (진단 회색행) — 수업 관리
     mg_cols = (mgmt.get("cols") or mgmt.get("columns") or []) if mgmt else []
     # 앱은 {name, rows:[{k,v}]} 형태로 보내므로 {subject, items} 로 정규화
     _norm = []
@@ -1028,16 +1028,16 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
         })
     mg_cols = _norm
     if mg_cols:
-        s_diagrows(prs, pal, data, "과목별 관리",
-                   mgmt.get("head","과목마다\n다르게 관리"),
-                   "과목 특성에 맞춰 학생을 관리합니다", mg_cols,
+        s_diagrows(prs, pal, data, "수업 관리",
+                   mgmt.get("head","수업은\n이렇게 관리합니다"),
+                   "수업 진행과 학생 관리 방식을 정리했습니다", mg_cols,
                    style=(mgmt.get("style") or "auto"))
     # 15 학습 로드맵 / 정기 상담 (불릿) — 규정
     r_items = rules.get("items", []) if rules else []
     if r_items:
-        s_bulletlist(prs, pal, data, "학원 지침",
-                     rules.get("head","약속과\n지침"),
-                     "안심하고 맡길 수 있도록 지침을 운영합니다",
+        s_bulletlist(prs, pal, data, "학원 규정",
+                     rules.get("head","함께 지키는\n학원 규정"),
+                     "안심하고 맡길 수 있도록 규정을 운영합니다",
                      [{"title":it.get("k",""),"desc":it.get("v","")} for it in r_items])
     # FAQ (불릿 리스트) — 있으면
     f_items = faq.get("items", []) if faq else []

@@ -693,7 +693,7 @@ def slide_management(prs, pal, d):
     mg = d.get("management")
     if not mg or not mg.get("columns"): return None
     s = new_slide(prs)
-    label(s, pal, "과목별 학생 관리")
+    label(s, pal, "수업 관리")
     header(s, mg.get("head",""), size=26)
     cols = mg["columns"][:2]
     single = (len(cols) == 1)
@@ -912,9 +912,9 @@ def slide_rules(prs, pal, d):
     mid = top + block/2
 
     # 좌 제목 — 블록 세로 중앙에 맞춤
-    label(s, pal, "관리 지침", x=PADX, y=mid-1.02)
+    label(s, pal, "학원 규정", x=PADX, y=mid-1.02)
     txt(s, PADX, mid-0.70, 3.35, 1.7,
-        [(ru.get("head","학원 관리 지침"), 31, True, INK_STRONG)],
+        [(ru.get("head") or "학원 규정 안내", 31, True, INK_STRONG)],
         line_spacing=1.16, anchor=MSO_ANCHOR.TOP)
 
     yy = top
