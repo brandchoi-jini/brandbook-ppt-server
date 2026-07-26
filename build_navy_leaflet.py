@@ -263,6 +263,91 @@ def p_management(s, d, P, x):
     return True
 
 
+def p_results(s, d, P, x):
+    """주요 실적 패널(예비). 앞 섹션이 비어 자리가 남을 때 채운다."""
+    items = as_dicts(d.get("achievements") or d.get("results"))[:6]
+    if not items:
+        return False
+    head(s, P, x, "주요 실적", ["숫자로 남은", "결과입니다"])
+    y = 1.55
+    for it in items:
+        name = clean(it.get("name") or it.get("title") or "")
+        desc = clean(it.get("desc") or it.get("description") or "")
+        line = " · ".join(v for v in (name, desc) if v)
+        if not line:
+            continue
+        add_box(s, x, y, CW, 0.62, fill=P["card"], line=P["line"], radius=R)
+        add_text(s, x + 0.2, y, CW - 0.4, 0.62, wrap_words(line, 22)[:2],
+                 size=FS.body_sm, color=P["text"],
+                 anchor=MSO_ANCHOR.MIDDLE, line_spacing=1.3, clip=False)
+        y += 0.76
+    return True
+
+
+def p_specials(s, d, P, x):
+    """특별 프로그램 패널(예비)."""
+    items = as_dicts(d.get("specials"))[:5]
+    if not items:
+        return False
+    head(s, P, x, "특별 프로그램", ["정규 수업 밖에서", "더 채웁니다"])
+    y = 1.55
+    for i, it in enumerate(items):
+        t = clean(it.get("title") or it.get("name") or "")
+        ds = clean(it.get("desc") or it.get("description") or "")
+        add_pill(s, x, y, 0.5, 0.29, f"{i+1:02d}", fill=P["primary"],
+                 color=P["onDark"], size=FS.small, radius=0.2)
+        add_text(s, x + 0.67, y, CW - 0.67, 0.31, t, size=FS.body + 0.75,
+                 bold=True, color=P["text"], anchor=MSO_ANCHOR.MIDDLE,
+                 line_spacing=1.0, clip=False)
+        if ds:
+            add_text(s, x + 0.67, y + 0.34, CW - 0.67, 0.5,
+                     wrap_words(ds, 22)[:2], size=FS.small,
+                     color=P["muted"], line_spacing=1.35, clip=False)
+        y += 0.98
+    return True
+
+
+def p_contact(s, d, P, x):
+    """연락처·오시는 길 패널. 내부면에 빈 칸이 생길 때 채워 허전함을 막는다."""
+    b = d.get("basic", {}) or {}
+    head(s, P, x, "등록 문의", ["궁금한 점은", "편하게 문의하세요"])
+    by = 1.55
+    add_box(s, x, by, CW, 1.7, fill=P["card"], line=P["line"], radius=R)
+    add_text(s, x + 0.26, by + 0.24, CW - 0.52, 0.29, "상담 · 예약",
+             size=FS.body, bold=True, color=P["primary"], line_spacing=1.0)
+    add_text(s, x + 0.26, by + 0.63, CW - 0.52, 0.35,
+             clean(b.get("phone") or gv(d, "academy", "phone") or ""),
+             size=16.5, bold=True, color=P["text"], line_spacing=1.0)
+    addr = clean(b.get("address") or gv(d, "academy", "location") or "")
+    if addr:
+        add_text(s, x + 0.26, by + 1.12, CW - 0.52, 0.5,
+                 wrap_words(addr, 20)[:2], size=FS.small,
+                 color=P["muted"], line_spacing=1.4)
+    # 약도 있으면 아래에
+    mapimg = gv(d, "assets", "map")
+    my = by + 1.7 + 0.28
+    if mapimg and my + 1.0 < SH - 0.4:
+        add_text(s, x, my, 2.0, 0.22, "오시는 길", size=8.0,
+                 bold=True, color=P["primary"], line_spacing=1.0)
+        my += 0.3
+        mh = min(2.2, SH - 0.4 - my)
+        add_box(s, x, my, CW, mh, fill=P["card"], line=P["line"], radius=R)
+        place_image(s, mapimg, x + 0.05, my + 0.05, CW - 0.1, mh - 0.1, cover=False)
+    return True
+
+
+def _has_faq(d):        return bool([i for i in as_dicts(d.get("faq"), "q") if clean(i.get("q") or i.get("question"))])
+def _has_admission(d):  return bool(as_dicts(d.get("admission"))) or bool(clean((d.get("basic") or {}).get("phone")))
+def _has_philosophy(d):
+    ph = d.get("philosophy") or {}
+    return bool(as_dicts(ph.get("points"), "title")) or bool(clean(gv(d, "intro", "body") or gv(d, "intro", "long") or ""))
+def _has_curriculum(d): return bool(as_dicts(d.get("curriculum"), "name"))
+def _has_management(d): return bool(as_dicts(d.get("management"))) or bool(as_dicts(d.get("strengths")))
+def _has_results(d):    return bool(as_dicts(d.get("achievements") or d.get("results")))
+def _has_specials(d):   return bool(as_dicts(d.get("specials")))
+def _has_features(d):   return bool(as_dicts(d.get("features")))
+
+
 def build(data, out=None, palette=None):
     P = get_palette(palette)
     d = data or {}
@@ -270,19 +355,55 @@ def build(data, out=None, palette=None):
     prs.slide_width = Inches(SW)
     prs.slide_height = Inches(SH)
 
-    # ── 외부면
+    # ── 데이터 있는 패널만 우선순위대로 뽑는다(빈 패널 방지) ──
+    #    표지는 항상 있고, 나머지 5칸(외부2 + 내부3)을 채운다.
+    #    앞 섹션이 비면 뒤 섹션이 당겨져 빈 자리가 생기지 않는다.
+    POOL = [
+        ("faq",        _has_faq,        p_faq),
+        ("admission",  _has_admission,  p_admission),
+        ("philosophy", _has_philosophy, p_philosophy),
+        ("curriculum", _has_curriculum, p_curriculum),
+        ("management", _has_management, p_management),
+        ("results",    _has_results,    p_results),
+        ("specials",   _has_specials,   p_specials),
+    ]
+    picked = []
+    for key, has, fn in POOL:
+        if len(picked) >= 5:
+            break
+        try:
+            if has(d):
+                picked.append(fn)
+        except Exception:
+            pass
+
+    def draw(slide, idx, x):
+        if idx < len(picked):
+            picked[idx](slide, d, P, x)
+
+    n = len(picked)
+
+    # ── 외부면: 콘텐츠 · 콘텐츠 · 표지 ──
     s1 = blank_slide(prs)
     divider(s1, P)
-    p_faq(s1, d, P, panel_x(0))
-    p_admission(s1, d, P, panel_x(1))
+    if n > 0:
+        draw(s1, 0, panel_x(0))
+    if n > 1:
+        draw(s1, 1, panel_x(1))
     p_cover(s1, d, P)
 
-    # ── 내부면
-    s2 = blank_slide(prs)
-    divider(s2, P)
-    p_philosophy(s2, d, P, panel_x(0))
-    p_curriculum(s2, d, P, panel_x(1))
-    p_management(s2, d, P, panel_x(2))
+    # ── 내부면: 남은 콘텐츠가 있으면 만든다 ──
+    #    3~4개면 내부에 1~2칸이 차고, 나머지 칸은 표지쪽 정보(연락처)로 보강해
+    #    허전하지 않게 한다. 5개면 3칸 모두 채운다.
+    # ── 내부면: 콘텐츠가 3칸을 채울 만큼(5개) 있을 때만 만든다 ──
+    #    부족하면 외부면 1장짜리 리플렛으로 낸다 → 반쯤 빈 내부면이 안 생긴다.
+    #    (외부면 = 콘텐츠·콘텐츠·표지 3칸이 이미 꽉 참)
+    if n >= 5:
+        s2 = blank_slide(prs)
+        divider(s2, P)
+        draw(s2, 2, panel_x(0))
+        draw(s2, 3, panel_x(1))
+        draw(s2, 4, panel_x(2))
 
     force_theme_font(prs)
     if out is None:

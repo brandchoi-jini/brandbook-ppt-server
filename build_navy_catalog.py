@@ -198,7 +198,7 @@ def c_results(prs, d, P, page):
     if not (ach or sp):
         return None
     s = blank_slide(prs)
-    y = head(s, P, "RESULTS & PROGRAMS",
+    y = head(s, P, "주요 실적",
              clean(d.get("achievementsHead") or "결과로 확인하는 학습"),
              d.get("achievementsLead"))
 
@@ -252,7 +252,7 @@ def c_schedule(prs, d, P, page):
     if not (groups or mg):
         return None
     s = blank_slide(prs)
-    y = head(s, P, "SCHEDULE & CARE", "수업 시간표와 학습 관리",
+    y = head(s, P, "학습 관리", "수업 시간표와 학습 관리",
              "시간표는 학기별로 조정될 수 있으니 상담 시 확인해 주세요."
              if groups else None)
 
@@ -413,7 +413,11 @@ def build(data, out=None, palette=None):
 
     c_cover(prs, d, P)
     page = 2
-    for fn in (c_philosophy, c_results, c_curriculum, c_schedule, c_admission):
+    # ★4장(표지 + 콘텐츠 3장)으로 맞춘다. 데이터 있는 페이지만 우선순위대로 3장.
+    #   앞 페이지가 비면 뒤 페이지가 당겨져 빈 장이 생기지 않는다.
+    for fn in (c_philosophy, c_curriculum, c_results, c_schedule, c_admission):
+        if page > 4:
+            break
         if fn(prs, d, P, page) is not None:
             page += 1
 
