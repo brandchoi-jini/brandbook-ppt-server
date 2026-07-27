@@ -450,24 +450,55 @@ def _badge_w(text):
     return max(2.0, 0.5 + len(text)*0.16)
 
 def slide_intro(prs, pal, d):
-    """학원 소개 — 소개문과 정체성 문단을 한 페이지에 문장으로. (강점 박스는 '교육 방향'으로 분리)"""
+    """학원 소개 — 위에 학원명·슬로건을 두고 구분선 아래 본문. 문장과 섞이지 않게 나눈다."""
     intro = d.get("intro") or {}
     body = str(intro.get("body","")).strip()
     if not body: return None
+    a = d.get("academy", {})
+    # 슬로건을 위에 따로 쓰므로, 본문 첫 문장이 슬로건을 되풀이하면 그 문장은 뺀다
+    _slo = str(a.get("slogan","")).strip()
+    if _slo:
+        _key = re.sub(r"[^가-힣A-Za-z0-9]", "", _slo)
+        _ss = [x.strip() for x in re.split(r"(?<=[.!?])\s+", body.replace("\n", " ")) if x.strip()]
+        if len(_ss) > 1 and len(_key) >= 6:
+            _first = re.sub(r"[^가-힣A-Za-z0-9]", "", _ss[0])
+            if _key in _first or _first.startswith(_key[:8]):
+                body = " ".join(_ss[1:])
     s = new_slide(prs)
     label(s, pal, "학원 소개")
-    header(s, intro.get("head",""), size=26)
-    paras_list = [p.strip() for p in body.split("\n") if p.strip()]
+
+    y = PADY + 0.32
+    # ① 학원명
+    name = str(a.get("name","")).strip()
+    if name:
+        txt(s, PADX+0.14, y, 11.76, 0.55, [(name, 27, True, INK_STRONG)], line_spacing=1.1)
+        y += 0.60
+    # ② 슬로건 — 본문과 색·크기를 달리해 한눈에 구분되게
+    slogan = str(a.get("slogan","")).strip()
+    if slogan:
+        ssz = 17.0
+        while ssz > 13 and wrap_lines(slogan, 11.76, ssz) > 1:
+            ssz -= 0.5
+        txt(s, PADX+0.14, y, 11.76, 0.42, [(slogan, ssz, True, pal["accent"])], line_spacing=1.1)
+        y += 0.50
+    # ③ 구분선
+    y += 0.16
+    hline(s, PADX, y, 11.9, LINE, 1)
+    top_min = y + 0.42
+
+    # ④ 본문
+    paras_list = [t.strip() for t in body.split("\n") if t.strip()]
     bw = 11.9 - 0.55
     size = 17.0
     def _lines(sz):
         return sum(wrap_lines(t, bw, sz) for t in paras_list)
-    while size > 13.0 and _lines(size) > 9:
+    while size > 13.0 and _lines(size) > 6:
         size -= 0.5
     lh = size*0.0139*1.62*1.55
     bh = _lines(size)*lh + 0.22*(len(paras_list)-1) + 0.2
-    top = 2.35 + max(0.0, (4.35 - bh)/2)
-    vline(s, PADX+0.03, top, min(bh, 4.35), pal["accent"], 3.2)
+    avail = 7.05 - top_min
+    top = top_min + max(0.0, (avail - bh)/2)
+    vline(s, PADX+0.03, top, min(bh, avail), pal["accent"], 3.2)
     paras(s, PADX+0.45, top, bw, bh,
           [[(t, size, False, INK)] for t in paras_list],
           line_spacing=1.55, para_space=9)
