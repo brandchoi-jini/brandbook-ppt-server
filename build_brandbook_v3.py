@@ -1326,6 +1326,7 @@ def _faq_page(prs, pal, fq, _items, pi, parts):
     return s
 
 def slide_closing(prs, pal, d):
+    if d.get("_noClosing"): return None      # 담당자가 목차에서 '상담 안내'를 끈 경우
     s = new_slide(prs)
     cl = d.get("closing", {})
     a = d["academy"]
