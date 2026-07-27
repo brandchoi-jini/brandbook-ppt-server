@@ -125,13 +125,21 @@ def _force_theme_font(prs, name=None):
         pass
 
 # ---------------- 팔레트 ----------------
+# pill_bg/pill_ink = 박스 소제목(바탕/글씨). 인쇄에서 흐려지지 않게 진한 바탕 + 흰 글씨.
+# card = 박스 바탕(연한 색), soft/soft2 = 태그·구분용 옅은 톤.
 PALETTES = {
-    "teal_blue":  {"accent": "0EA5B7", "accent2": "2B7FFF", "navy": "22375F",
-                   "soft": "E2F6F8", "soft2": "E8F1FF", "pill_bg": "D5EEF2", "pill_ink": "0B7C8A"},
-    "navy_amber": {"accent": "22375F", "accent2": "D98A1F", "navy": "22375F",
-                   "soft": "E7ECF4", "soft2": "FBF0DC", "pill_bg": "DCE3EF", "pill_ink": "22375F"},
-    "green_orange":{"accent": "1F7A55", "accent2": "E07B39", "navy": "1D3F30",
-                   "soft": "E3F2EA", "soft2": "FCEBDD", "pill_bg": "D6EBDF", "pill_ink": "196046"},
+    "navy_blue":  {"accent": "1F3350", "accent2": "3A6EA5", "navy": "1F3350",
+                   "soft": "E4EBF5", "soft2": "EAF0F8", "card": "EDF2F9",
+                   "pill_bg": "1F3350", "pill_ink": "FFFFFF"},
+    "teal_blue":  {"accent": "12727E", "accent2": "3A6EA5", "navy": "1F3350",
+                   "soft": "E0EDEF", "soft2": "E9EFF7", "card": "E9F2F3",
+                   "pill_bg": "12727E", "pill_ink": "FFFFFF"},
+    "navy_amber": {"accent": "22375F", "accent2": "C07A15", "navy": "22375F",
+                   "soft": "E4EAF3", "soft2": "F8EDD8", "card": "EDF1F8",
+                   "pill_bg": "22375F", "pill_ink": "FFFFFF"},
+    "green_orange":{"accent": "1B6B4A", "accent2": "C96A2C", "navy": "1D3F30",
+                   "soft": "DFEEE6", "soft2": "F8E7D8", "card": "E8F2EC",
+                   "pill_bg": "1B6B4A", "pill_ink": "FFFFFF"},
 }
 
 INK = "2D3748"        # 본문 진한먹색
@@ -193,6 +201,11 @@ def _qr_png(url):
 
 
 CORNER_R = 0.07     # 모서리 반경(인치) — 살짝만 둥글게. 기본 둥근사각형은 너무 둥글다.
+
+def card_bg(pal):
+    """박스 바탕 — 팔레트별 연한 색(없으면 기본 회백색)"""
+    return pal.get("card", CARD)
+
 
 def rect(slide, x, y, w, h, hexc=None, radius=False, line_hex=None, line_w=None):
     shp = MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE
@@ -304,7 +317,7 @@ def bullets(slide, x, y, w, h, items, size=13, color=INK, dot_hex="0EA5B7",
         pPr = p._p.get_or_add_pPr()
         pPr.set('marL', str(int(indent_in*EMU_IN)))
         pPr.set('indent', str(int(-indent_in*EMU_IN)))
-        r0 = p.add_run(); r0.text = "•\t"
+        r0 = p.add_run(); r0.text = "• "
         r0.font.size = Pt(size); r0.font.bold = True; r0.font.color.rgb = _rgb(dot_hex); _apply_font(r0)
         r1 = p.add_run(); r1.text = it
         r1.font.size = Pt(size); r1.font.color.rgb = _rgb(color); _apply_font(r1)
@@ -410,7 +423,8 @@ def slide_cover(prs, pal, d):
     PH_X, PH_Y = 7.15, 0.62
     PH_W, PH_H = SLIDE_W - PH_X - 0.72, SLIDE_H - 0.62*2
     rect(s, PH_X, PH_Y, PH_W, PH_H, PH_BG)
-    if photos and place_image(s, photos[0], PH_X, PH_Y, PH_W, PH_H, cover=True):
+    cover_img = assets.get("cover") or ""          # 담당자가 '표지 사진'으로 지정한 것만
+    if cover_img and place_image(s, cover_img, PH_X, PH_Y, PH_W, PH_H, cover=True):
         pass
     else:
         txt(s, PH_X, PH_Y+PH_H/2-0.2, PH_W, 0.4,
@@ -426,13 +440,14 @@ def slide_cover(prs, pal, d):
     # 슬로건
     slo = a.get("slogan", "")
     ssize = fit_size(slo, 18, 12, lambda sz: int(6.2/(sz*0.017)))
-    txt(s, lx, 1.85, 6.3, 0.5, [(slo, ssize, False, pal["accent"])], wrap=False)
+    txt(s, lx, 1.85, 6.3, 0.5, [(slo, ssize, False, pal["accent"])],
+        align=PP_ALIGN.LEFT, wrap=True)
     # 학원명
     txt(s, lx, name_y, 6.4, 1.3, [(a["name"], 52, True, pal["navy"])], line_spacing=1.0)
     # 과목 뱃지
-    badge = rect(s, lx, 3.75, _badge_w(a.get("subjects","")), 0.62, pal["soft"], radius=True)
+    badge = rect(s, lx, 3.75, _badge_w(a.get("subjects","")), 0.62, pal["pill_bg"], radius=True)
     txt(s, lx, 3.80, _badge_w(a.get("subjects",""))-0.0, 0.5,
-        [(a.get("subjects",""), 17, True, pal["pill_ink"])], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        [(a.get("subjects",""), 17, True, "FFFFFF")], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     # 연락처 (각 한 줄) — 전화가 두 개면 둘 다, 카카오 채널도 있으면 함께
     _tel = a.get("phone","")
     if a.get("phone2"):
@@ -450,464 +465,284 @@ def _badge_w(text):
     return max(2.0, 0.5 + len(text)*0.16)
 
 def slide_intro(prs, pal, d):
-    """학원 소개 — 위에 학원명·슬로건을 두고 구분선 아래 본문. 문장과 섞이지 않게 나눈다."""
+    """학원 소개 — 한마디 / 슬로건 / 소개문 / 강점 박스를 한 장에."""
     intro = d.get("intro") or {}
-    body = str(intro.get("body","")).strip()
-    if not body: return None
+    body  = str(intro.get("body","")).strip()
+    feats = [f for f in (d.get("features") or []) if str(f.get("desc","")).strip()][:6]
+    if not body and not feats: return None
     a = d.get("academy", {})
-    # 슬로건을 위에 따로 쓰므로, 본문 첫 문장이 슬로건을 되풀이하면 그 문장은 뺀다
-    _slo = str(a.get("slogan","")).strip()
-    if _slo:
-        _key = re.sub(r"[^가-힣A-Za-z0-9]", "", _slo)
-        _ss = [x.strip() for x in re.split(r"(?<=[.!?])\s+", body.replace("\n", " ")) if x.strip()]
-        if len(_ss) > 1 and len(_key) >= 6:
-            _first = re.sub(r"[^가-힣A-Za-z0-9]", "", _ss[0])
-            if _key in _first or _first.startswith(_key[:8]):
-                body = " ".join(_ss[1:])
     s = new_slide(prs)
     label(s, pal, "학원 소개")
 
-    y = PADY + 0.32
-    # ① 학원명
-    name = str(a.get("name","")).strip()
-    if name:
-        txt(s, PADX+0.14, y, 11.76, 0.55, [(name, 27, True, INK_STRONG)], line_spacing=1.1)
-        y += 0.60
-    # ② 슬로건 — 본문과 색·크기를 달리해 한눈에 구분되게
+    head = str(intro.get("head","")).strip()
+    if head:
+        header(s, head, size=26)
+        hl = max(1, wrap_lines(head, 11.76, 26))     # 한마디가 두 줄이면 그만큼 아래에서 시작
+        y = 0.88 + hl*0.50 + 0.16
+    else:
+        y = 1.10
+
     slogan = str(a.get("slogan","")).strip()
     if slogan:
-        ssz = 17.0
-        while ssz > 13 and wrap_lines(slogan, 11.76, ssz) > 1:
+        ssz = 15.5
+        while ssz > 12.5 and wrap_lines(slogan, 11.76, ssz) > 1:
             ssz -= 0.5
-        txt(s, PADX+0.14, y, 11.76, 0.42, [(slogan, ssz, True, pal["accent"])], line_spacing=1.1)
-        y += 0.50
-    # ③ 구분선
-    y += 0.16
-    hline(s, PADX, y, 11.9, LINE, 1)
-    top_min = y + 0.42
+        txt(s, PADX+0.14, y, 11.76, 0.38, [(slogan, ssz, True, pal["accent"])], line_spacing=1.1)
+        y += 0.44
 
-    # ④ 본문
-    paras_list = [t.strip() for t in body.split("\n") if t.strip()]
-    bw = 11.9 - 0.55
-    size = 17.0
-    def _lines(sz):
-        return sum(wrap_lines(t, bw, sz) for t in paras_list)
-    while size > 13.0 and _lines(size) > 6:
-        size -= 0.5
-    lh = size*0.0139*1.62*1.55
-    bh = _lines(size)*lh + 0.22*(len(paras_list)-1) + 0.2
-    avail = 7.05 - top_min
-    top = top_min + max(0.0, (avail - bh)/2)
-    vline(s, PADX+0.03, top, min(bh, avail), pal["accent"], 3.2)
-    paras(s, PADX+0.45, top, bw, bh,
-          [[(t, size, False, INK)] for t in paras_list],
-          line_spacing=1.55, para_space=9)
-    return s
+    if slogan and body:
+        _key = re.sub(r"[^가-힣A-Za-z0-9]", "", slogan)
+        _ss = [x.strip() for x in re.split(r"(?<=[.!?])\s+", body.replace("\n", " ")) if x.strip()]
+        if len(_ss) > 1 and len(_key) >= 6:
+            _f = re.sub(r"[^가-힣A-Za-z0-9]", "", _ss[0])
+            if _key in _f or _f.startswith(_key[:8]):
+                body = " ".join(_ss[1:])
 
+    grid_top = 2.45
+    if body:
+        bsz = 14.0
+        while bsz > 11.5 and wrap_lines(body, 11.76, bsz) > 3:
+            bsz -= 0.5
+        bl = max(1, wrap_lines(body, 11.76, bsz))
+        bh = bl*(bsz*0.0139*1.40)*1.5 + 0.08
+        txt(s, PADX+0.14, y, 11.76, bh+0.2, [(body, bsz, False, INK)], line_spacing=1.5)
+        grid_top = y + bh + 0.26
 
-def slide_features(prs, pal, d):
-    """교육 방향 — 강점 6박스. (예전에는 소개 슬라이드 하단에 붙어 있었다)"""
-    feats = (d.get("features") or [])[:6]
-    if not feats: return None
-    s = new_slide(prs)
-    label(s, pal, "수업 강점")
-    header(s, d.get("feat_head","") or "", size=26)
-    n = len(feats)
-    ncol = 3 if n >= 3 else n
-    nrow = (n+ncol-1)//ncol
-    gap = 0.28
-    gw = (11.9-(ncol-1)*gap)/ncol
-    top = 2.30
-    gh = min(2.3, (7.05-top-0.24*(nrow-1))/max(nrow,1))
-    for i, f in enumerate(feats):
-        r = i//ncol; c = i%ncol
-        in_row = min(ncol, n - r*ncol)              # 이 줄에 실제로 놓이는 개수
-        off = ((ncol-in_row)*(gw+gap))/2            # 덜 찬 줄은 가운데로
-        x = PADX + off + c*(gw+gap); y = top + r*(gh+0.24)
-        rect(s, x, y, gw, gh, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
-        title = str(f.get("title",""))
-        pw = min(gw-0.4, 0.5 + _disp_width(title)*0.21)
-        rect(s, x+(gw-pw)/2, y+0.20, pw, 0.44, pal["pill_bg"], radius=True)
-        txt(s, x+(gw-pw)/2, y+0.22, pw, 0.40, [(title, 13.5, True, pal["pill_ink"])],
-            align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-        desc = str(f.get("desc",""))
-        dsz = fit_box(desc, gw-0.44, gh-0.95, 13.5, 10.5, line_spacing=1.3)
-        txt(s, x+0.22, y+0.80, gw-0.44, gh-0.95, [(desc, dsz, False, INK)],
-            align=PP_ALIGN.CENTER, line_spacing=1.3)
+    if feats:
+        n = len(feats)
+        ncol = 3 if n >= 5 else (n if n <= 3 else 2)
+        nrow = (n+ncol-1)//ncol
+        gap, gapy = 0.26, 0.22
+        gw = (11.9-(ncol-1)*gap)/ncol
+        gh = min(2.2, (7.05-grid_top-gapy*(nrow-1))/max(nrow,1))
+        for i, f in enumerate(feats):
+            r = i//ncol; c = i%ncol
+            in_row = min(ncol, n - r*ncol)
+            off = ((ncol-in_row)*(gw+gap))/2
+            x = PADX + off + c*(gw+gap); yy = grid_top + r*(gh+gapy)
+            rect(s, x, yy, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
+            title = str(f.get("title",""))
+            pw = min(gw-0.3, 0.5 + _disp_width(title)*0.20)
+            rect(s, x+(gw-pw)/2, yy+0.18, pw, 0.40, pal["pill_bg"], radius=True)
+            txt(s, x+(gw-pw)/2, yy+0.19, pw, 0.38, [(title, 12.5, True, pal["pill_ink"])],
+                align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+            desc = str(f.get("desc",""))
+            dh = gh-0.72
+            dsz = fit_box(desc, gw-0.44, dh, 13.5, 9.5, line_spacing=1.32)
+            txt(s, x+0.22, yy+0.66, gw-0.44, dh, [(desc, dsz, False, INK)],
+                align=PP_ALIGN.CENTER, line_spacing=1.32)
     return s
 
 
 def slide_achievements(prs, pal, d):
-    """주요 실적 — 유형별(고입·대입·내신 등) 박스를 한 페이지에. 페이지를 나누지 않는다."""
+    """주요 실적 — 유형별 카드. 실적 사진이 있으면 하단 띠로 함께 배치."""
     ach = d.get("achievements")
     if not ach: return None
-    groups = ach.get("groups") or []
+    groups = [g for g in (ach.get("groups") or []) if g.get("items")]
     if not groups:
         items = ach.get("items") or []
         if not items: return None
         groups = [{"name": "", "items": items}]
-    groups = [g for g in groups if g.get("items")]
-    if not groups: return None
-
     s = new_slide(prs)
     label(s, pal, "주요 실적")
     header(s, ach.get("head",""), size=26)
-    n = len(groups)
+
+    imgs = ((d.get("assets") or {}).get("achievements") or [])[:2]
     top = 2.25 if str(ach.get("head","")).strip() else 1.60
     bottom = 7.05
-    colors = [pal["accent"], pal["accent2"], pal["navy"], pal["accent"]]
+    band = 0.0
+    if imgs:
+        band = 1.55
+        bottom = 7.05 - band - 0.24
 
-    _mx = max(len(g["items"]) for g in groups)
-    per = 4 if _mx <= 3 else (3 if _mx <= 4 else 2)
-    cols = min(n, per)
+    n = len(groups)
+    cols = min(n, 3 if n <= 3 else 2)
     rows = (n+cols-1)//cols
-    gapx, gapy = (0.30 if cols <= 3 else 0.24), 0.26
+    gapx, gapy = 0.30, 0.24
     gw = (11.9-(cols-1)*gapx)/cols
-    gh = (bottom-top-(rows-1)*gapy)/rows
+    gh_max = (bottom-top-(rows-1)*gapy)/rows
+    # 내용 분량으로 카드 높이를 정한다(빈 공간이 크게 남지 않게)
+    _need = 1.0
+    for g in groups:
+        _rows = 0.0
+        for x in g["items"]:
+            _nt = str(x.get("note") or "")
+            _nl = max(1, wrap_lines(_nt, gw-0.82, 11.5)) if _nt else 0
+            _rows += 0.28 + _nl*0.26 + 0.14
+        _need = max(_need, 0.92 + _rows + 0.26)
+    gh = min(gh_max, max(2.1, _need))
+    top = top + max(0.0, (bottom-top - (gh*rows + gapy*(rows-1)))/2)
+    colors = [pal["accent"], pal["navy"], pal["accent2"], pal["accent"]]
 
     for gi, g in enumerate(groups):
         c = gi % cols; r = gi // cols
         x = PADX + c*(gw+gapx); y = top + r*(gh+gapy)
         kc = colors[gi % len(colors)]
-        rect(s, x, y, gw, gh, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
-        iy = y + 0.28
-        gname = str(g.get("name","")).strip()
-        if gname:
-            pw = min(gw-0.5, 0.55 + _disp_width(gname)*0.22)
-            rect(s, x+0.30, iy, pw, 0.44, _tint_for(pal, kc), radius=True)
-            txt(s, x+0.30, iy, pw, 0.44, [(gname, 14, True, kc)],
-                align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-            iy += 0.62
-        items = g["items"]
-        avail = (y + gh - 0.28) - iy
-        slot = min(1.30, avail / max(len(items), 1))
-        tsz = 16.5 if slot >= 1.0 else (15 if slot >= 0.8 else 13.5)
-        nsz = 12.5 if slot >= 1.0 else (11.5 if slot >= 0.8 else 10.5)
-        th = tsz*0.0139*1.5
-        for ii, it in enumerate(items):
-            iy2 = iy + ii*slot
+        rect(s, x, y, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
+        # 유형 이름 — 진한 바탕 배지 + 아이콘
+        gname = str(g.get("name","")).strip() or "주요 실적"
+        _ICON = {"고입 실적":"🎓", "대입 실적":"🏛", "내신·성적 향상":"📈", "성장 사례":"🌱"}
+        ico = _ICON.get(gname, "★")
+        _lab = f"{ico}  {gname}"
+        pw = min(gw-0.4, 0.6 + _disp_width(_lab)*0.20)
+        rect(s, x+(gw-pw)/2, y+0.26, pw, 0.48, pal["pill_bg"], radius=True)
+        tsz = 14 if _disp_width(_lab) < 12 else 12.5
+        txt(s, x+(gw-pw)/2, y+0.27, pw, 0.46, [(_lab, tsz, True, pal["pill_ink"])],
+            align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+        # 항목들
+        area_y0 = y + 0.92
+        area_h  = (y + gh - 0.22) - area_y0
+        # 각 항목 높이를 내용으로 계산해 블록 전체를 세로 가운데에 둔다
+        _rows = []
+        for it in g["items"]:
+            _n = str(it.get("note") or "")
+            _nl = max(1, wrap_lines(_n, gw-0.76, 11.5)) if _n else 0
+            _rows.append(0.28 + _nl*0.21 + 0.14)
+        _blk = sum(_rows)
+        rowsy = area_y0 + max(0.0, (area_h - _blk)/2)
+        for ii, it in enumerate(g["items"]):
             title  = str(it.get("title") or it.get("name") or "").strip()
             change = str(it.get("change") or "").strip()
             note   = str(it.get("note") or "").strip()
             if not change and not note:
-                lines = [t.strip() for t in str(it.get("desc","")).split("\n") if t.strip()]
-                change = lines[0] if lines else ""
-                note = " / ".join(lines[1:])
-            # 제목+변화가 한 줄에 들어가도록 크기를 맞춘다(줄바꿈·잘림 방지)
-            line_w = gw-0.68
-            tsz2 = tsz
-            _full = title + ("   " if (title and change) else "") + change
-            while tsz2 > 12 and _disp_width(_full)*tsz2*0.0139 > line_w:
+                ls = [t.strip() for t in str(it.get("desc","")).split("\n") if t.strip()]
+                change = ls[0] if ls else ""
+                note = " / ".join(ls[1:])
+            iy2 = rowsy + sum(_rows[:ii])
+            # 제목 줄 — 왼줄 맞춤. 길면 크기를 줄여 한 줄에 담는다.
+            _full = ("• " + title + ("  " if (title and change) else "") + change)
+            tsz2 = 12.5
+            while tsz2 > 10.0 and _disp_width(_full)*tsz2*0.0139 > (gw-0.52):
                 tsz2 -= 0.5
-            _tl = max(1, wrap_lines(_full, line_w, tsz2))
-            th2 = _tl*tsz2*0.0139*1.5
-            runs = []
+            runs = [("•  ", tsz2, True, kc)]
             if title:  runs.append((title + ("   " if change else ""), tsz2, True, INK_STRONG))
             if change: runs.append((change, tsz2, True, kc))
-            if runs:
-                paras(s, x+0.34, iy2, line_w, th2+0.06, [runs], line_spacing=1.16, wrap=(_tl>1))
+            paras(s, x+0.26, iy2, gw-0.52, 0.30, [runs],
+                  align=PP_ALIGN.LEFT, line_spacing=1.15, wrap=True)
             if note:
-                nh = max(0.20, slot - th2 - 0.14)
-                nsz2 = fit_box(note, gw-0.72, nh, nsz, 9.5, line_spacing=1.28)
-                txt(s, x+0.34, iy2+th2+0.02, gw-0.68, nh,
-                    [(note, nsz2, False, "667788")], line_spacing=1.28)
-            if ii < len(items)-1:
-                hline(s, x+0.34, iy2+slot-0.07, gw-0.68, LINE, 1)
+                nl = max(1, wrap_lines(note, gw-0.82, 11.5))
+                txt(s, x+0.52, iy2+0.27, gw-0.82, nl*0.26+0.08,
+                    [(note, 11.5, False, "5A6A7A")], align=PP_ALIGN.LEFT, line_spacing=1.26)
+
+    # 실적 사진 — 별도 장이 아니라 이 페이지의 데코
+    if imgs:
+        by = 7.05 - band
+        iw = (11.9 - 0.24*(len(imgs)-1))/len(imgs)
+        for i, u in enumerate(imgs):
+            ix = PADX + i*(iw+0.24)
+            rect(s, ix, by, iw, band, PH_BG, radius=True)
+            place_image(s, u, ix, by, iw, band, cover=True)
     return s
 
-
-def slide_achieve_images(prs, pal, d):
-    """실적 자료 이미지(입결표·수상 배너 등) — 담당자가 올린 이미지를 그대로 싣는다."""
-    imgs = ((d.get("assets") or {}).get("achievements") or [])[:4]
-    if not imgs: return None
-    s = new_slide(prs)
-    label(s, pal, "실적 자료")
-    header(s, "", size=26)
-    n = len(imgs)
-    cols = 1 if n == 1 else 2
-    rows = (n+cols-1)//cols
-    gap = 0.30
-    gw = (11.9-(cols-1)*gap)/cols
-    gh = (7.05-2.25-(rows-1)*gap)/rows
-    ok = False
-    for i, u in enumerate(imgs):
-        x = PADX + (i%cols)*(gw+gap); y = 2.25 + (i//cols)*(gh+gap)
-        rect(s, x, y, gw, gh, PH_BG, radius=True)
-        if place_image(s, u, x, y, gw, gh, cover=False):
-            ok = True
-    if not ok:
-        return None
-    return s
-
-
-def slide_targets(prs, pal, d):
-    tg = d.get("targets")
-    if not tg or not tg.get("items"): return None
-    pages = _chunk(tg["items"], 4)      # 초·중·고·특강까지 한 장, 그 이상이면 나눔
-    last = None
-    base = 0
-    for pi, items in enumerate(pages, 1):
-        last = _targets_page(prs, pal, tg, items, pi, len(pages), base)
-        base += len(items)
-    return last
-
-def _targets_page(prs, pal, tg, items, pi, parts, base):
-    s = new_slide(prs)
-    label(s, pal, _part("수업 대상", pi, parts))
-    header(s, tg.get("head","") if pi == 1 else "", size=26)
-    n = len(items)
-    stage_colors = _stage_colors(pal, base + n)[base:base+n]   # 초→중→고 색 이어짐
-    _photos = ((tg.get("_photos") or []))
-    area_top = 2.15 if str(tg.get("head","")).strip() else 1.55
-    area_bottom = 7.05
-    avail = area_bottom - area_top
-    rh = min(1.55, avail/n)
-    # 행 묶음을 세로 중앙 정렬(위아래 여백 균등)
-    block = rh*n
-    top = area_top + (avail - block)/2
-    for i, it in enumerate(items):
-        y = top + i*rh
-        cy = y + rh/2          # 행 세로 중앙
-        c = stage_colors[i]
-        soft = _tint_for(pal, c)
-        subj = it.get("subj","")
-        desc = it.get("desc","")
-        # 좌 학년 라벨(pill) — 학년별 색, 크게, 행 중앙 정렬
-        lw = 2.0; lh = 0.66
-        rect(s, PADX, cy-lh/2, lw, lh, soft, radius=True)
-        txt(s, PADX, cy-lh/2, lw, lh, [(it["grade"], 15, True, c)],
-            align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-        # 중앙: 과목/반(학년색 강조, 크게, 최대 2줄) + 배우는 내용
-        cx = PADX+lw+0.35; cw = 11.9+PADX - cx - 2.1
-        # 17pt 기준 2줄까지 허용: 1줄 넘으면 16 → 15로만 낮춤(작아지지 않게)
-        ssize = fit_size(subj, 17, 15, lambda sz: int((cw/(sz*0.016))*2.0))
-        # 과목명 줄 수 추정
-        two_line = len(subj) > int(cw/(ssize*0.016))
-        subj_box_h = 0.72 if two_line else 0.44
-        if desc:
-            block_h = subj_box_h + 0.05 + 0.4
-            by = cy - block_h/2
-            txt(s, cx, by, cw, subj_box_h, [(subj, ssize, True, c)], line_spacing=1.18,
-                anchor=MSO_ANCHOR.TOP)
-            txt(s, cx, by+subj_box_h+0.05, cw, 0.5, [(desc, 13.5, False, INK)], line_spacing=1.3)
-        else:
-            # 과목명만 → 라벨과 같은 세로 중앙에
-            txt(s, cx, cy-subj_box_h/2, cw, subj_box_h, [(subj, ssize, True, c)],
-                line_spacing=1.18, anchor=MSO_ANCHOR.MIDDLE)
-        # 우 사진 — 올린 학원 사진이 있으면 넣고, 없으면 회색 자리
-        pw = 1.85; ph_h = rh-0.4
-        rect(s, 11.9+PADX-pw, cy-ph_h/2, pw, ph_h, PH_BG, radius=True)
-        _ph = _photos[(base+i) % len(_photos)] if _photos else ""
-        if _ph:
-            place_image(s, _ph, 11.9+PADX-pw, cy-ph_h/2, pw, ph_h, cover=True)
-        if i < n-1:
-            hline(s, PADX, y+rh, 11.9, LINE, 1)
-    return s
-
-def _subj_h(subj, cw):
-    # 과목명이 한 줄이면 0.42, 두 줄이면 0.72 정도 (대략)
-    return 0.72 if len(subj) > int(cw/0.017) else 0.42
-
-def slide_classes(prs, pal, d):
-    """반 구성 — 학년(초·중·고·특강)마다 박스. 반은 하나도 빠뜨리지 않는다."""
-    cl = d.get("classes")
-    if not cl or not cl.get("groups"): return None
-    groups = [g for g in cl["groups"] if g.get("rows")]
-    if not groups: return None
-    colors = _stage_colors(pal, max(len(groups), 1))
-    top = 2.25 if str(cl.get("head","")).strip() else 1.60
-    bottom = 7.05
-
-    # 한 페이지에 담을 학년 수 — 반이 많은 학년이 있으면 열을 줄여 설명이 읽히게 한다
-    _mx = max(len(g["rows"]) for g in groups)
-    _per = 4 if _mx <= 2 else (3 if _mx <= 3 else 2)
-    pages = _chunk(groups, min(len(groups), _per))
-    last = None
-    for pi, page in enumerate(pages, 1):
-        s = new_slide(prs)
-        label(s, pal, _part("반 구성", pi, len(pages)))
-        header(s, cl.get("head","") if pi == 1 else "", size=26)
-        n = len(page)
-        cols = n                      # 학년 박스는 가로 한 줄 — 반이 많아도 박스가 세로를 다 쓴다
-        gapx = 0.30 if n <= 3 else 0.24
-        gw = (11.9-(cols-1)*gapx)/cols
-        gh = bottom-top
-        for gi, g in enumerate(page):
-            x = PADX + gi*(gw+gapx); y = top
-            kc = colors[(pi-1)*4 + gi] if (pi-1)*4+gi < len(colors) else colors[gi % len(colors)]
-            rect(s, x, y, gw, gh, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
-            gname = str(g.get("grade","")).strip()
-            iy = y + 0.28
-            if gname:
-                pw = min(gw-0.5, 0.55 + _disp_width(gname)*0.22)
-                rect(s, x+0.30, iy, pw, 0.44, _tint_for(pal, kc), radius=True)
-                txt(s, x+0.30, iy, pw, 0.44, [(gname, 14, True, kc)],
-                    align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-                iy += 0.60
-            rws = g["rows"]
-            avail = (y + gh - 0.26) - iy
-            slot = min(1.15, avail / max(len(rws), 1))
-            nmz = 14.5 if slot >= 0.95 else (13.5 if slot >= 0.75 else 12)
-            dsz = 12 if slot >= 0.95 else (11 if slot >= 0.75 else 10)
-            nh = nmz*0.0139*1.5
-            for j, rw in enumerate(rws):
-                yy = iy + j*slot
-                txt(s, x+0.34, yy, gw-0.68, nh+0.06,
-                    [(str(rw.get("name","")), nmz, True, kc)], line_spacing=1.15, wrap=False)
-                desc = str(rw.get("desc","") or "")
-                if desc:
-                    dh = max(0.20, slot - nh - 0.06)
-                    dz = fit_box(desc, gw-0.72, dh, dsz, 9.0, line_spacing=1.26)
-                    txt(s, x+0.34, yy+nh+0.02, gw-0.68, dh,
-                        [(desc, dz, False, "5A6A7A")], line_spacing=1.26)
-                if j < len(rws)-1:
-                    hline(s, x+0.34, yy+slot-0.06, gw-0.68, LINE, 1)
-        last = s
-    return last
-
-
-def slide_growth(prs, pal, d):
-    """성장 방식 — 과목을 열로 나란히. 과목이 1개든 4개든 한 장에, 5개 이상이면 나눈다."""
-    gr = d.get("growth")
-    if not gr or not gr.get("items"): return None
-    subs = [x for x in gr["items"] if (x.get("teach") or x.get("check") or x.get("after"))]
-    if not subs: return None
-    pages = _chunk(subs, 4)
-    last = None
-    for pi, group in enumerate(pages, 1):
-        last = _growth_page(prs, pal, gr, group, pi, len(pages))
-    return last
-
-def _growth_page(prs, pal, gr, subs, pi, parts):
-    s = new_slide(prs)
-    label(s, pal, _part("수업 방식", pi, parts))
-    header(s, gr.get("head","") if pi == 1 else "", size=26)
-    n = len(subs)
-    gap = 0.30
-    cw = (11.9 - (n-1)*gap)/n
-    top, bottom = 2.30, 7.05
-    colors = [pal["accent"], pal["accent2"], pal["navy"]]
-    # ★"확인하는 방법"은 <수업 관리> 슬라이드가 담당한다(중복 방지) → 여기서는 방식과 결과만
-    ROWS = [("이렇게 가르칩니다", "teach"), ("3개월 후 달라지는 것", "after")]
-    # 본문 글자 크기: 가장 긴 칸 기준으로 한 번에 정한다(칸마다 들쭉날쭉하지 않게)
-    band = (bottom - top - 0.62) / len(ROWS)  # 과목명 줄 제외한 한 칸 높이
-    vs = 13.5
-    def _fits(sz):
-        for it in subs:
-            for _, k in ROWS:
-                v = str(it.get(k,"") or "")
-                if not v: continue
-                need = wrap_lines(v, cw-0.36, sz) * (sz*0.0139*1.62) * 1.34
-                if need > band - 0.34: return False
-        return True
-    while vs > 9.5 and not _fits(vs):
-        vs -= 0.5
-    for i, it in enumerate(subs):
-        x = PADX + i*(cw+gap)
-        c = colors[i % len(colors)]
-        nm = str(it.get("name","")).strip()
-        # 과목 헤더
-        if nm:
-            pw = min(cw, 0.6 + _disp_width(nm)*0.26)
-            rect(s, x, top, pw, 0.50, c, radius=True)
-            txt(s, x, top, pw, 0.50, [(nm, 15, True, "FFFFFF")],
-                align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-        if i < n-1:
-            vline(s, x+cw+gap/2, top, bottom-top, LINE, 1)
-        y = top + 0.62
-        for ri, (lab_t, k) in enumerate(ROWS):
-            v = str(it.get(k,"") or "")
-            if not v:
-                y += band; continue
-            txt(s, x, y, cw, 0.30, [(lab_t, 11.5, True, c)])
-            txt(s, x, y+0.32, cw-0.18, band-0.36, [(v, vs, False, INK)], line_spacing=1.34)
-            if ri < len(ROWS)-1:
-                hline(s, x, y+band-0.10, cw-0.15, LINE, 1)
-            y += band
-    return s
-
-
-def slide_curriculum(prs, pal, d):
-    cu = d.get("curriculum")
-    if not cu or not cu.get("stages"): return None
-    pages = _chunk(cu["stages"], 4)     # 초·중·고 3단이 기본, 4단까지 한 장
-    last = None
-    base = 0
-    for pi, stages in enumerate(pages, 1):
-        last = _curriculum_page(prs, pal, cu, stages, pi, len(pages), base)
-        base += len(stages)
-    return last
-
-def _curriculum_page(prs, pal, cu, stages, pi, parts, base):
-    s = new_slide(prs)
-    label(s, pal, _part("커리큘럼", pi, parts))
-    header(s, cu.get("head","") if pi == 1 else "", size=26)
-    if cu.get("sub") and pi == 1:
-        txt(s, PADX, 1.55, 11.9, 0.4, [(cu["sub"], 15, False, "556677")])
-    n = len(stages)
-    # 단계별 색: 초→중→고로 진해짐
-    step_colors = _stage_colors(pal, base + n)[base:base+n]
-    gap = 0.35
-    bw = (11.9 - (n-1)*gap)/n
-    # ── 항목이 길거나 많으면 글자를 줄여 박스 안에 담는다(문장은 자르지 않는다) ──
-    MAX_BH = 3.25
-    item_size = 11.5
-    def _need(sz):
-        mx = 1
-        for st in stages:
-            ln = sum(max(1, wrap_lines(str(it), bw-0.62, sz)) for it in st.get("items", []) or [""])
-            mx = max(mx, ln)
-        return 0.60 + mx*(sz*0.0139*1.62)*1.25 + 0.30
-    bh = _need(item_size)
-    while bh > MAX_BH and item_size > 9.0:
-        item_size -= 0.5
-        bh = _need(item_size)
-    bh = min(bh, MAX_BH)
-    base_y = 6.6           # 계단 맨 아래 박스의 바닥
-    step_up = max(0.0, min(0.62, (6.6-2.30-bh)/(n-1))) if n>1 else 0  # 위치만 계단
-    for i, st in enumerate(stages):
-        x = PADX + i*(bw+gap)
-        y = base_y - bh - i*step_up     # 높이는 같고 위치만 위로
-        c = step_colors[i]
-        soft = _tint_for(pal, c)
-        # 태그라인 (박스 위)
-        tag = st.get("tag","")
-        if tag:
-            tagw = 0.5 + len(tag)*0.30
-            rect(s, x+0.05, y-0.62, tagw, 0.48, soft, radius=True)
-            txt(s, x+0.05, y-0.60, tagw, 0.44, [(tag, 16, True, c)],
-                align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-            vline(s, x+0.05+tagw/2, y-0.14, 0.14, c, 2.5)
-        # 단계 박스 (모두 동일 높이)
-        rect(s, x, y, bw, bh, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
-        rect(s, x, y, bw, 0.60, c, radius=True)
-        rect(s, x, y+0.30, bw, 0.30, c)
-        _nm = st.get("name") or st.get("title") or f"{i+1}단계"
-        txt(s, x+0.22, y+0.08, bw-0.44, 0.45, [(_nm, 16, True, "FFFFFF")], anchor=MSO_ANCHOR.MIDDLE)
-        bullets(s, x+0.22, y+0.80, bw-0.44, bh-0.9, st.get("items", []), size=item_size,
-                color=INK, dot_hex=c, line_spacing=1.2, para_space=4)
-        # 상승 화살표 — 두 박스 사이 여백 중앙에 배치(박스에 가리지 않게)
-        if i < n-1:
-            y_next = base_y - bh - (i+1)*step_up
-            mid_y = ((y + bh/2) + (y_next + bh/2)) / 2      # 두 박스 중심의 중간
-            txt(s, x+bw+0.02, mid_y-0.22, gap-0.04, 0.44, [("↗", 20, True, MUTED)],
-                align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-    return s
 
 def _stage_colors(pal, n):
     seq = [pal["accent"], pal["accent2"], pal["navy"]]
     if n <= 3:
-        return seq[:n] if n>1 else [pal["accent"]]
-    # 3단계 초과면 반복/보간
+        return seq[:n] if n > 1 else [pal["accent"]]
     out = []
     for i in range(n):
         out.append(seq[min(i, len(seq)-1)])
     return out
 
+
 def _tint_for(pal, c):
     if c == pal["accent"]: return pal["soft"]
     if c == pal["accent2"]: return pal["soft2"]
     return "E7ECF4"
+
+
+def slide_targets(prs, pal, d):
+    """수업 대상 · 커리큘럼 — 위는 학년별 반 편성, 아래는 단계별 커리큘럼. 한 장에 묶는다."""
+    tg = d.get("targets") or {}
+    cl = d.get("classes") or {}
+    cu = d.get("curriculum") or {}
+    rows_src = tg.get("items") or []
+    stages   = cu.get("stages") or []
+    if not rows_src and not stages: return None
+
+    s = new_slide(prs)
+    label(s, pal, "수업 대상 · 커리큘럼")
+    head = str(tg.get("head","") or cu.get("head","")).strip()
+    if head:
+        header(s, head, size=26)
+        top = 2.20
+    else:
+        top = 1.55
+
+    colors = _stage_colors(pal, max(len(rows_src), len(stages), 1))
+    photos = tg.get("_photos") or []
+
+    # ── 위: 학년별 반 편성 ──
+    y = top
+    if rows_src:
+        n = len(rows_src)
+        area = (4.20 if stages else 7.05) - top
+        rh = min(0.92, area/max(n,1))
+        pw_col, gap = 1.15, 0.28
+        has_ph = bool(photos)
+        ph_w = 1.55 if has_ph else 0.0
+        tw = 11.9 - pw_col - gap - (ph_w + 0.25 if has_ph else 0)
+        for i, it in enumerate(rows_src):
+            yy = y + i*rh
+            kc = colors[i % len(colors)]
+            gname = str(it.get("grade","")).strip()
+            if gname:
+                rect(s, PADX, yy+(rh-0.40)/2, pw_col, 0.40, _tint_for(pal, kc), radius=True)
+                txt(s, PADX, yy+(rh-0.40)/2, pw_col, 0.40, [(gname, 13, True, kc)],
+                    align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+            subj = str(it.get("subj","")).strip()
+            if subj:
+                ssz = fit_box(subj, tw-0.1, rh-0.16, 15.5, 11.5, line_spacing=1.3)
+                txt(s, PADX+pw_col+gap, yy+0.08, tw, rh-0.16,
+                    [(subj, ssz, True, kc)], line_spacing=1.3, anchor=MSO_ANCHOR.MIDDLE)
+            if has_ph:
+                px = 11.9+PADX-ph_w
+                rect(s, px, yy+0.08, ph_w, rh-0.20, PH_BG, radius=True)
+                u = photos[i % len(photos)]
+                if u: place_image(s, u, px, yy+0.08, ph_w, rh-0.20, cover=True)
+            if i < n-1:
+                hline(s, PADX, yy+rh, 11.9, LINE, 1)
+        y = top + n*rh + 0.16
+
+    # ── 아래: 단계별 커리큘럼 ──
+    if stages:
+        if rows_src:
+            hline(s, PADX, y, 11.9, LINE, 1)
+            y += 0.26
+        n = len(stages)
+        gap = 0.26
+        gw = (11.9-(n-1)*gap)/max(n,1)
+        gh = 7.05 - y
+        step_colors = _stage_colors(pal, n)
+        for i, st_ in enumerate(stages):
+            x = PADX + i*(gw+gap)
+            c = step_colors[i]
+            rect(s, x, y, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
+            if i > 0:      # 카드 사이 진행 화살표
+                txt(s, x-gap-0.06, y+gh/2-0.20, gap+0.12, 0.40,
+                    [("→", 15, True, c)], align=PP_ALIGN.CENTER, wrap=False)
+            nm = str(st_.get("name","")).strip()
+            tag = str(st_.get("tag","")).strip()
+            iy = y + 0.24
+            if tag:
+                pw = min(gw-0.4, 0.5 + _disp_width(tag)*0.19)
+                rect(s, x+0.22, iy, pw, 0.34, pal["pill_bg"], radius=True)
+                txt(s, x+0.30, iy, pw, 0.34, [(tag, 12.5, True, pal["pill_ink"])],
+                    align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
+                iy += 0.42
+            if nm:
+                txt(s, x+0.22, iy, gw-0.44, 0.44, [(nm, 17, True, INK_STRONG)], line_spacing=1.15)
+                iy += 0.46
+            items = [str(v).strip() for v in (st_.get("items") or []) if str(v).strip()]
+            if items:
+                ih = y + gh - iy - 0.18
+                isz = 13.5
+                while isz > 9.5 and sum(max(1, wrap_lines(v, gw-0.62, isz)) for v in items)*(isz*0.0139*1.62)*1.30 > ih:
+                    isz -= 0.5
+                bullets(s, x+0.22, iy, gw-0.44, ih, items, size=isz,
+                        color=INK, dot_hex=c, line_spacing=1.22, para_space=4)
+    return s
+
 
 def slide_timetable(prs, pal, d, group, rows, part=None, parts=None):
     s = new_slide(prs)
@@ -1014,7 +849,7 @@ def _table_hlines(tbl, hex_line):
 def slide_specials(prs, pal, d):
     sp = d.get("specials")
     if not sp or not sp.get("items"): return None
-    pages = _chunk(sp["items"], 4)
+    pages = _chunk(sp["items"], 6)
     last = None
     for pi, items in enumerate(pages, 1):
         last = _specials_page(prs, pal, sp, items, pi, len(pages))
@@ -1026,6 +861,25 @@ def _specials_page(prs, pal, sp, items, pi, parts):
     header(s, sp.get("head","") if pi == 1 else "", size=26)
     n = len(items)
     gx, gy = PADX, 2.25
+    # 5~6개는 3열 2행
+    if n >= 5:
+        cols, rows = 3, 2
+        gapx, gapy = 0.28, 0.24
+        cw = (11.9-(cols-1)*gapx)/cols
+        ch = (7.05-gy-(rows-1)*gapy)/rows
+        for i, it in enumerate(items):
+            r = i//cols; c = i%cols
+            in_row = min(cols, n - r*cols)
+            off = ((cols-in_row)*(cw+gapx))/2
+            x = gx + off + c*(cw+gapx); y = gy + r*(ch+gapy)
+            rect(s, x, y, cw, ch, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
+            paras(s, x+0.26, y+0.28, cw-0.52, 0.52, [[
+                (it.get("no","")+"  ", 16, True, pal["accent"]),
+                (it["title"], 16, True, INK_STRONG)]], line_spacing=1.2)
+            dsz = fit_box(it.get("desc",""), cw-0.52, ch-1.05, 13, 10, line_spacing=1.32)
+            txt(s, x+0.26, y+0.88, cw-0.52, ch-1.05,
+                [(it.get("desc",""), dsz, False, INK)], line_spacing=1.32)
+        return s
     # 개수에 맞춰 배치: 1개=전폭 / 2개=좌우 / 3개=가로 3단 / 4개=사분면
     if n <= 3:
         gap = 0.34
@@ -1033,7 +887,7 @@ def _specials_page(prs, pal, sp, items, pi, parts):
         ch = 4.5
         for i, it in enumerate(items):
             x = gx + i*(cw+gap)
-            rect(s, x, gy, cw, ch, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
+            rect(s, x, gy, cw, ch, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
             paras(s, x+0.3, gy+0.35, cw-0.6, 0.6, [[
                 (it.get("no","")+"  ", 20, True, pal["accent"]),
                 (it["title"], 19, True, INK_STRONG)]], line_spacing=1.2)
@@ -1059,8 +913,8 @@ def slide_management(prs, pal, d):
     if not mg or not mg.get("columns"): return None
     # ★과목이 3개·4개여도 버리지 않는다. 한 장에 2개씩 싣고 나머지는 다음 장으로.
     _cols = [c for c in mg["columns"] if c.get("rows")]
-    # 3과목까지는 한 장(3열), 4과목 이상은 열이 좁아 읽히지 않으므로 2개씩 나눈다
-    pages = [_cols] if len(_cols) <= 3 else _chunk(_cols, 2)
+    # 과목 2개까지 한 장. 3개 이상이면 2개씩 나눠 설명 폭을 지킨다.
+    pages = _chunk(_cols, 2)
     if not pages: return None
     last = None
     for pi, cols in enumerate(pages, 1):
@@ -1077,10 +931,8 @@ def _management_page(prs, pal, mg, cols, pi, parts):
     # 타입 선택: mg["style"] = "row" | "box" | "auto"
     # auto → 과목 1개면 박스(오른쪽 여백 방지), 2개면 줄 타입, 3개 이상이면 열이 좁아지므로 박스
     style = (mg.get("style") or "auto").lower()
-    if style == "auto":
-        style = "box" if (single or len(cols) >= 3) else "row"
-    if len(cols) >= 3:
-        style = "box"      # 3열 이상에서 줄 타입은 설명 폭이 나오지 않는다
+    if style in ("auto", "box"):
+        style = "row"      # 세원 양식으로 통일: 항목 pill 왼쪽 + 설명 오른쪽
 
     if style == "box":
         return _management_box(s, pal, cols, single, key_colors)
@@ -1091,7 +943,7 @@ def _management_row(s, pal, cols, single, key_colors):
     # 줄 타입: 좌 키박스 + 우 설명. 과목 1개면 전체폭 대신 왼쪽 정리(오른쪽 여백 축소)
     total = 11.9; gap = 0.7
     if single:
-        colw = 7.6          # 전체폭(11.9) 대신 왼쪽에 모아 오른쪽 여백 줄임
+        colw = total        # 과목 1개면 전체폭을 써서 설명이 넉넉하게
         col_x = [PADX]
     else:
         colw = (total-gap)/2
@@ -1250,7 +1102,9 @@ def slide_admission(prs, pal, d):
 
         txt(s, PADX, block_mid-0.62, 1.5, 1.24, [(st["no"], num_size, True, pal["accent"])],
             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-        txt(s, text_x, y+sep_gap, text_w, 0.5, [(st["title"], title_size, True, INK_STRONG)])
+        # 왼쪽에 큰 숫자가 있으므로 제목의 "1단계" 같은 중복 표기는 뗀다
+        _t = re.sub(r"^\s*\d+\s*단계\s*", "", str(st.get("title","")))
+        txt(s, text_x, y+sep_gap, text_w, 0.5, [(_t, title_size, True, INK_STRONG)])
         if body:
             txt(s, text_x, desc_top, text_w, desc_h,
                 [("– ", size, False, INK), (body, size, False, INK)],
@@ -1264,8 +1118,8 @@ def slide_rules(prs, pal, d):
     items = ru["items"]
     n = len(items)
     rx = 4.3; rw = 11.9+PADX-rx
-    kw = 0.9
-    vw = rw - kw - 0.28   # 설명 폭
+    kw = 1.15
+    vw = rw - kw - 0.42   # 설명 폭 (오른쪽 여백 확보)
 
     # 본문 영역(헤더 없는 슬라이드): 슬라이드 세로 정중앙(7.5in의 절반=3.75)을 기준으로 중앙 정렬
     AREA_TOP = 0.75
@@ -1311,8 +1165,8 @@ def slide_rules(prs, pal, d):
     for i, it in enumerate(items):
         th = text_h[i]
         cyi = yy + th/2
-        rect(s, rx, cyi-0.23, kw, 0.46, pal["soft"], radius=True)
-        txt(s, rx, cyi-0.23, kw, 0.46, [(it["k"], 13, True, pal["pill_ink"])],
+        rect(s, rx, cyi-0.23, kw, 0.46, pal["pill_bg"], radius=True)
+        txt(s, rx, cyi-0.23, kw, 0.46, [(it["k"], 12.5, True, pal["pill_ink"])],
             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
         txt(s, rx+kw+0.28, cyi-th/2-0.05, vw, th+0.1, [(it["v"], vsizes[i], False, INK)],
             line_spacing=1.3, anchor=MSO_ANCHOR.MIDDLE)
@@ -1343,7 +1197,7 @@ def _faq_page(prs, pal, fq, _items, pi, parts):
     for i, it in enumerate(items):
         r=i//ncol; c=i%ncol
         x = gx + c*(cw+gap); y = gy + r*(ch+0.22)
-        rect(s, x, y, cw, ch, CARD, radius=True, line_hex=CARD_LINE, line_w=1)
+        rect(s, x, y, cw, ch, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
         # Q
         q = it["q"]; a = it["a"]
         qsize = fit_box(q, cw-0.62, 0.74, 15, 11, line_spacing=1.25)
@@ -1374,17 +1228,23 @@ def slide_closing(prs, pal, d):
     lines = head.split("\n")
     hl = cl.get("highlight","")
     para_runs = []
+    # 카피 글자 크기를 좌측 폭(5.9in) 안에 들어오도록 맞춘다 — 그대로 두면 페이지를 넘친다
+    HW = 5.9
+    hsz = 30.0
+    while hsz > 18.0 and any(_disp_width(ln)*hsz*0.0139 > HW for ln in lines if ln.strip()):
+        hsz -= 1.0
     for ln in lines:
         runs=[]
         if hl and hl in ln:
             before, after = ln.split(hl,1)
-            if before: runs.append((before, 30, True, INK_STRONG))
-            runs.append((hl, 30, True, pal["accent"]))
-            runs.append((after, 30, True, INK_STRONG))
+            if before: runs.append((before, hsz, True, INK_STRONG))
+            runs.append((hl, hsz, True, pal["accent"]))
+            runs.append((after, hsz, True, INK_STRONG))
         else:
-            runs.append((ln, 30, True, INK_STRONG))
+            runs.append((ln, hsz, True, INK_STRONG))
         para_runs.append(runs)
-    paras(s, PADX, 1.0, 5.9, 1.6, para_runs, line_spacing=1.32, para_space=2, wrap=False)
+    _hh = max(1.6, len([l for l in lines if l.strip()]) * hsz*0.0139*1.62*1.32 + 0.2)
+    paras(s, PADX, 1.0, HW, _hh, para_runs, line_spacing=1.32, para_space=2, wrap=True)
     # 연락처(각 한 줄) — 값 있는 것만
     contact_paras = []
     _rows = []
@@ -1424,8 +1284,8 @@ def slide_closing(prs, pal, d):
             align=PP_ALIGN.CENTER)
     # CTA
     if cl.get("cta"):
-        rect(s, PADX, 6.55, 11.9, 0.62, pal["accent"], radius=True)
-        txt(s, PADX, 6.60, 11.9, 0.52, [(cl["cta"], 18, True, "FFFFFF")],
+        rect(s, PADX, 6.52, 11.9, 0.66, pal["navy"], radius=True)
+        txt(s, PADX, 6.57, 11.9, 0.56, [(cl["cta"], 20, True, "FFFFFF")],
             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     return s
 
@@ -1446,15 +1306,10 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
     # ⑤수업 방식·수업 관리 / ⑥시간표 / ⑦특별 프로그램 / ⑧입학 절차 / ⑨학원 규정 /
     # ⑩자주 묻는 질문 / ⑪상담 안내
     slide_cover(prs, pal, data)
-    slide_intro(prs, pal, data)          # ① 학원 소개 (소개+정체성 한 페이지)
-    slide_achievements(prs, pal, data)   # ② 주요 실적 (고입·대입·내신 박스)
-    slide_achieve_images(prs, pal, data) #    실적 자료 이미지
-    slide_features(prs, pal, data)       # ③ 수업 강점 (총괄 특징 5개)
-    slide_targets(prs, pal, data)        # ④ 수업 대상
-    slide_classes(prs, pal, data)        #    반 구성
-    slide_curriculum(prs, pal, data)     #    커리큘럼
-    slide_growth(prs, pal, data)         # ⑤ 수업 방식 (과목별 수업 내용)
-    slide_management(prs, pal, data)     #    수업 관리 (과목별 운영·관리)
+    slide_intro(prs, pal, data)          # ① 학원 소개 (슬로건·소개문·강점 한 장)
+    slide_achievements(prs, pal, data)   # ② 주요 실적 (유형별 카드 + 실적 사진)
+    slide_targets(prs, pal, data)        # ③ 수업 대상 · 커리큘럼 (한 장)
+    slide_management(prs, pal, data)     # ④ 수업 관리 (과목별)
 
     # ⑥ 시간표: 그룹 수만큼, 행 많으면 자동 분할
     for tt in data.get("timetables", []):
