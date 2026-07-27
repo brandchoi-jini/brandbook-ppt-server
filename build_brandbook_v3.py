@@ -177,6 +177,21 @@ def _strip_style(shape):
     for st in sp.findall(qn('p:style')):
         sp.remove(st)
 
+def _qr_png(url):
+    """링크를 QR 이미지(BytesIO)로. qrcode 패키지가 없으면 None을 돌려주고 자리 박스를 쓴다."""
+    try:
+        import qrcode
+        from io import BytesIO
+        qr = qrcode.QRCode(version=None, box_size=8, border=1,
+                           error_correction=qrcode.constants.ERROR_CORRECT_M)
+        qr.add_data(str(url).strip()); qr.make(fit=True)
+        img = qr.make_image(fill_color="#22375F", back_color="white").convert("RGB")
+        buf = BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
+
 CORNER_R = 0.07     # 모서리 반경(인치) — 살짝만 둥글게. 기본 둥근사각형은 너무 둥글다.
 
 def rect(slide, x, y, w, h, hexc=None, radius=False, line_hex=None, line_w=None):
@@ -464,7 +479,7 @@ def slide_features(prs, pal, d):
     feats = (d.get("features") or [])[:6]
     if not feats: return None
     s = new_slide(prs)
-    label(s, pal, "교육 방향")
+    label(s, pal, "수업 강점")
     header(s, d.get("feat_head","") or "", size=26)
     n = len(feats)
     ncol = 3 if n >= 3 else n
@@ -734,7 +749,7 @@ def slide_growth(prs, pal, d):
 
 def _growth_page(prs, pal, gr, subs, pi, parts):
     s = new_slide(prs)
-    label(s, pal, _part("성장 방식", pi, parts))
+    label(s, pal, _part("수업 방식", pi, parts))
     header(s, gr.get("head","") if pi == 1 else "", size=26)
     n = len(subs)
     gap = 0.30
@@ -1353,12 +1368,28 @@ def slide_closing(prs, pal, d):
     if contact_paras:
         paras(s, PADX, 2.55, 6.0, 2.05, contact_paras, line_spacing=1.28,
               para_space=(8 if len(_rows) <= 3 else 4))
-    # QR
-    for i,(lab) in enumerate(["네이버 블로그","카카오 맵"]):
+    # ── QR: 자료에 주소가 있는 채널만 만든다(없으면 아예 그리지 않는다) ──
+    links = a.get("links") or []
+    if not links:
+        _auto = []
+        for k, lab in (("blog","네이버 블로그"), ("homepage","홈페이지"),
+                       ("instagram","인스타그램"), ("kakao","카카오 채널")):
+            if a.get(k): _auto.append({"label": lab, "url": a[k]})
+        links = _auto
+    links = [l for l in links if str(l.get("url","")).strip()][:3]
+    for i, l in enumerate(links):
         qx = PADX + i*1.5
-        rect(s, qx, 4.7, 0.95, 0.95, "EEF2F7", radius=True, line_hex=LINE, line_w=1)
-        txt(s, qx, 5.05, 0.95, 0.3, [("QR", 11, False, "9FB0C6")], align=PP_ALIGN.CENTER)
-        txt(s, qx-0.15, 5.72, 1.25, 0.3, [(lab, 11, False, "667788")], align=PP_ALIGN.CENTER)
+        rect(s, qx, 4.7, 0.95, 0.95, "FFFFFF", radius=True, line_hex=LINE, line_w=1)
+        buf = _qr_png(l["url"])
+        if buf is not None:
+            try:
+                s.shapes.add_picture(buf, Inches(qx+0.06), Inches(4.76), Inches(0.83), Inches(0.83))
+            except Exception:
+                buf = None
+        if buf is None:
+            txt(s, qx, 5.05, 0.95, 0.3, [("QR", 11, False, "9FB0C6")], align=PP_ALIGN.CENTER)
+        txt(s, qx-0.15, 5.72, 1.25, 0.3, [(str(l.get("label","")), 11, False, "667788")],
+            align=PP_ALIGN.CENTER)
     # CTA
     if cl.get("cta"):
         rect(s, PADX, 6.55, 11.9, 0.62, pal["accent"], radius=True)
@@ -1378,17 +1409,22 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
     prs.slide_width = Inches(SLIDE_W)
     prs.slide_height = Inches(SLIDE_H)
 
+    # ── 브랜드북 목차 ──
+    # 표지 / ①학원 소개 / ②주요 실적 / ③수업 강점 / ④수업 대상·반 구성·커리큘럼 /
+    # ⑤수업 방식·수업 관리 / ⑥시간표 / ⑦특별 프로그램 / ⑧입학 절차 / ⑨학원 규정 /
+    # ⑩자주 묻는 질문 / ⑪상담 안내
     slide_cover(prs, pal, data)
-    slide_intro(prs, pal, data)         # 소개 + 정체성(문장 한 페이지)
-    slide_features(prs, pal, data)      # 교육 방향(강점 6박스)
-    slide_achievements(prs, pal, data)  # 실적(유형별 박스, 한 페이지)
-    slide_achieve_images(prs, pal, data)
-    slide_targets(prs, pal, data)
-    slide_classes(prs, pal, data)       # 반 구성(학년별 박스, 전량)
-    slide_curriculum(prs, pal, data)
-    slide_growth(prs, pal, data)        # 과목별 성장 방식
+    slide_intro(prs, pal, data)          # ① 학원 소개 (소개+정체성 한 페이지)
+    slide_achievements(prs, pal, data)   # ② 주요 실적 (고입·대입·내신 박스)
+    slide_achieve_images(prs, pal, data) #    실적 자료 이미지
+    slide_features(prs, pal, data)       # ③ 수업 강점 (총괄 특징 5개)
+    slide_targets(prs, pal, data)        # ④ 수업 대상
+    slide_classes(prs, pal, data)        #    반 구성
+    slide_curriculum(prs, pal, data)     #    커리큘럼
+    slide_growth(prs, pal, data)         # ⑤ 수업 방식 (과목별 수업 내용)
+    slide_management(prs, pal, data)     #    수업 관리 (과목별 운영·관리)
 
-    # 시간표: 그룹 수만큼, 행 많으면 자동 분할
+    # ⑥ 시간표: 그룹 수만큼, 행 많으면 자동 분할
     for tt in data.get("timetables", []):
         group = tt.get("group","")
         rows = tt.get("rows", [])
@@ -1400,12 +1436,11 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
             for pi, ch in enumerate(chunks, 1):
                 slide_timetable(prs, pal, data, group, ch, part=pi, parts=len(chunks))
 
-    slide_specials(prs, pal, data)
-    slide_management(prs, pal, data)
-    slide_admission(prs, pal, data)
-    slide_rules(prs, pal, data)
-    slide_faq(prs, pal, data)
-    slide_closing(prs, pal, data)
+    slide_specials(prs, pal, data)       # ⑦ 특별 프로그램
+    slide_admission(prs, pal, data)      # ⑧ 입학 절차
+    slide_rules(prs, pal, data)          # ⑨ 학원 규정 (출결·보강·환불)
+    slide_faq(prs, pal, data)            # ⑩ 자주 묻는 질문
+    slide_closing(prs, pal, data)        # ⑪ 상담 안내 (위치·연락처)
 
     _force_theme_font(prs)
     prs.save(out)   # out은 경로(str) 또는 file-like(BytesIO) 모두 가능
