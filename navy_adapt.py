@@ -253,11 +253,10 @@ def adapt(schema):
                 sps.append({"title": t, "desc": ds})
     d["specials"] = sps
 
-    # 학습관리: management 우선, 없으면 rules
+    # 학습관리와 학원 운영규정은 의미가 다르므로 서로 대체하지 않는다.
     mg = _kv_items(schema.get("management"))
-    if not mg:
-        mg = _kv_items(schema.get("rules"))
     d["management"] = mg
+    d["rules"] = _kv_items(schema.get("rules"))
 
     d["achievements"] = _achievements(schema)
     d["achievementsHead"] = _head(schema.get("achievements"), "주요 실적")

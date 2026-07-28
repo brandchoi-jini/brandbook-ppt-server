@@ -118,10 +118,10 @@ def convert(raw, brand=None):
     curriculum = brand.get("curriculum") or {}
     if curriculum and "stages" in curriculum:
         # tag/level 보정
-        deftag=["기초 정착","내신 심화","대입 완성"]
         for i,st in enumerate(curriculum["stages"]):
             st.setdefault("level", i+1)
-            st.setdefault("tag", deftag[i] if i < len(deftag) else "")
+            # 근거 없는 학년별 상투어를 자동 생성하지 않는다.
+            st.setdefault("tag", "")
 
     # 시간표(courses → 학년 그룹). 유미니 실제 구조:
     #   course = {name, staffName, room, weeklySchedule:{slots:[{day,start,duration_minutes}]}}
@@ -181,7 +181,8 @@ def convert(raw, brand=None):
     if not rules:
         op = _g(content,"operatingRules",default={})
         if isinstance(op, dict) and op:
-            keymap=[("attendance","출결"),("homework","과제"),("absence","결석"),("withdrawal","퇴원"),("refund","환불")]
+            # 과제·테스트·피드백은 학습관리이며 운영규정에 넣지 않는다.
+            keymap=[("attendance","출결"),("absence","결석"),("withdrawal","퇴원"),("refund","환불")]
             items=[{"k":lab,"v":op[k]} for k,lab in keymap if op.get(k)]
             if items: rules={"head":"학원 관리 지침","items":items}
 
@@ -193,11 +194,11 @@ def convert(raw, brand=None):
         for it in (fq or []):
             if isinstance(it, dict) and it.get("q"):
                 items.append({"q":it.get("q",""),"a":it.get("a","") or it.get("answer","")})
-        if items: faq={"head":"궁금한 점을 미리 확인하세요","items":items[:4]}
+        if items: faq={"head":"","items":items[:4]}
 
     # 마무리
     closing = brand.get("closing") or {
-        "head": f"우리 아이의 성장,\n{name}이 함께합니다",
+        "head": "",
         "highlight": name,
         "cta": "지금 바로 상담을 예약하세요"
     }

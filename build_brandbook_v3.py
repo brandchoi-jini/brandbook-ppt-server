@@ -397,7 +397,9 @@ PADY = 0.58      # 상단 여백
 def label(slide, pal, text, x=PADX, y=PADY):
     """작은 라벨 + 세로바 (한글만)"""
     vline(slide, x+0.02, y+0.02, 0.20, pal["accent"], weight=3.2)
-    txt(slide, x+0.14, y-0.02, 6.0, 0.3, [(text, 12, True, LABEL)], anchor=MSO_ANCHOR.TOP)
+    # ★상자 폭 6.0 고정이라 오른쪽 열 텍스트와 <상자가> 겹쳤다 → 글자 폭만큼
+    _lw = min(6.0, max(0.9, _disp_width(str(text or ""))*0.19 + 0.25))
+    txt(slide, x+0.14, y-0.02, _lw, 0.3, [(text, 12, True, LABEL)], anchor=MSO_ANCHOR.TOP)
 
 def header(slide, text, x=PADX, y=None, size=27, w=11.9):
     if y is None: y = PADY + 0.30
@@ -406,7 +408,9 @@ def header(slide, text, x=PADX, y=None, size=27, w=11.9):
     while size > 19 and wrap_lines(t, w-0.14, size) > 2:
         size -= 1
     # 제목 왼쪽을 라벨 글자 시작선(세로바 오른쪽, +0.14)에 맞춤
-    txt(slide, x+0.14, y, w-0.14, 0.95, [(t, size, True, INK_STRONG)], line_spacing=1.12)
+    # ★상자 높이 0.95 고정이면 한 줄일 때 아래 요소와 상자가 겹친다 → 실제 줄 수만큼
+    _hh = max(1, wrap_lines(t, w-0.14, size))*(size*0.0139*1.35) + 0.10
+    txt(slide, x+0.14, y, w-0.14, _hh, [(t, size, True, INK_STRONG)], line_spacing=1.12)
 
 
 # ======================================================================
@@ -442,12 +446,24 @@ def slide_cover(prs, pal, d):
     ssize = fit_size(slo, 18, 12, lambda sz: int(6.2/(sz*0.017)))
     txt(s, lx, 1.85, 6.3, 0.5, [(slo, ssize, False, pal["accent"])],
         align=PP_ALIGN.LEFT, wrap=True)
-    # 학원명
-    txt(s, lx, name_y, 6.4, 1.3, [(a["name"], 52, True, pal["navy"])], line_spacing=1.0)
-    # 과목 뱃지
-    badge = rect(s, lx, 3.75, _badge_w(a.get("subjects","")), 0.62, pal["pill_bg"], radius=True)
-    txt(s, lx, 3.80, _badge_w(a.get("subjects",""))-0.0, 0.5,
-        [(a.get("subjects",""), 17, True, "FFFFFF")], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+    # 학원명 — ★두 줄이 되는 긴 이름에서 과목 뱃지와 겹쳤다(고정 3.75) → 아래로 흐르게
+    nm = str(a.get("name","") or "")
+    BADGE_H, CONTACT_Y = 0.62, 5.75
+    def _nm_h(sz):
+        return max(1, wrap_lines(nm, 6.4, sz))*(sz*0.0139*1.30) + 0.10
+    nsz = 52.0
+    while nsz > 26:
+        if wrap_lines(nm, 6.4, nsz) <= 2 and name_y + _nm_h(nsz) + 0.16 + BADGE_H <= CONTACT_Y - 0.20:
+            break
+        nsz -= 2
+    nh = _nm_h(nsz)
+    txt(s, lx, name_y, 6.4, nh, [(nm, nsz, True, pal["navy"])], line_spacing=1.0)
+    # 과목 뱃지 — 학원명 아래로
+    _bw = _badge_w(a.get("subjects",""))
+    by = min(name_y + nh + 0.16, CONTACT_Y - BADGE_H - 0.20)
+    badge = rect(s, lx, by, _bw, BADGE_H, pal["pill_bg"], radius=True)
+    txt(s, lx, by, _bw, BADGE_H,
+        [(a.get("subjects",""), 17, True, "FFFFFF")], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
     # 연락처 (각 한 줄) — 전화가 두 개면 둘 다, 카카오 채널도 있으면 함께
     _tel = a.get("phone","")
     if a.get("phone2"):
@@ -462,7 +478,8 @@ def slide_cover(prs, pal, d):
     return s
 
 def _badge_w(text):
-    return max(2.0, 0.5 + len(text)*0.16)
+    # 한글 표시폭 반영 — len() 은 한글을 과소평가해 뱃지를 넘쳤다
+    return max(1.9, 0.52 + _disp_width(str(text or ""))*0.23)
 
 def slide_intro(prs, pal, d):
     """학원 소개 — 한마디 / 슬로건 / 소개문 / 강점 박스를 한 장에."""
@@ -661,7 +678,7 @@ def slide_targets(prs, pal, d):
     if not rows_src and not stages: return None
 
     s = new_slide(prs)
-    label(s, pal, "수업 대상 · 커리큘럼")
+    label(s, pal, "수업 대상 · 과목")
     head = str(tg.get("head","") or cu.get("head","")).strip()
     if head:
         header(s, head, size=26)
@@ -923,7 +940,7 @@ def slide_management(prs, pal, d):
 
 def _management_page(prs, pal, mg, cols, pi, parts):
     s = new_slide(prs)
-    label(s, pal, _part("수업 관리", pi, parts))
+    label(s, pal, _part("과목별 학생 관리", pi, parts))
     header(s, mg.get("head","") if pi == 1 else "", size=26)
     single = (len(cols) == 1)
     key_colors = [pal["accent"], pal["accent2"], pal["navy"], pal["accent"]]
@@ -959,7 +976,7 @@ def _management_row(s, pal, cols, single, key_colors):
         kw = 1.15
         for j, row in enumerate(col["rows"]):
             yy = rows_top + j*pitch
-            vv = row["v"]
+            vv = str(row.get("v") or "")
             vsize = fit_size(vv, 14, 11, lambda sz: int(((colw-kw-0.2)/(sz*0.017))*2.4))
             # 본문은 위에서부터 흐르게 하고, 키 단추를 본문 첫 줄 높이에 맞춘다
             LINE_H = vsize * 0.0175 * 1.28          # 한 줄 높이(인치 근사)
@@ -968,7 +985,7 @@ def _management_row(s, pal, cols, single, key_colors):
             pill_h = 0.44
             pill_y = yy + max(0.0, (LINE_H - pill_h)/2)   # 첫 줄 중앙과 단추 중앙 일치
             rect(s, x, pill_y, kw, pill_h, kc, radius=True)
-            ktext = row["k"]
+            ktext = str(row.get("k") or "")
             ksize = 12.5 if len(ktext) <= 5 else (11 if len(ktext) <= 7 else 10)
             txt(s, x+0.05, pill_y+0.02, kw-0.1, pill_h-0.04, [(ktext, ksize, True, "FFFFFF")],
                 align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
@@ -1024,7 +1041,7 @@ def _management_box(s, pal, cols, single, key_colors):
 
 def _mgmt_card(s, pal, kc, soft_bg, x, y, w, h, row):
     # 카드 배경 없음: 소제목 pill(컬러)만 + 설명. (연한 박스 배경 제거)
-    ktext = row["k"]
+    ktext = str(row.get("k") or "")
     ksize = 13 if len(ktext) <= 5 else (11.5 if len(ktext) <= 7 else 10.5)
     # 키 pill (열이 좁으면 pill과 글자를 함께 줄인다)
     kw = min(w-0.15, 0.42 + _disp_width(ktext)*0.20)
@@ -1035,7 +1052,7 @@ def _mgmt_card(s, pal, kc, soft_bg, x, y, w, h, row):
     txt(s, x, y+0.06, kw, ph, [(ktext, ksize, True, "FFFFFF")],
         align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
     # 설명 — 칸 높이 안에 들어오도록 자동 축소(넘쳐서 아래 칸을 침범하지 않게)
-    vv = row["v"]
+    vv = str(row.get("v") or "")
     top_off = 0.44 if h < 0.95 else 0.54
     vsize = fit_box(vv, w-0.12, max(0.22, h-top_off), 13.5, 9.0, line_spacing=1.26)
     txt(s, x+0.02, y+top_off, w-0.10, max(0.22, h-top_off), [(vv, vsize, False, INK)],
@@ -1129,7 +1146,7 @@ def slide_rules(prs, pal, d):
     # 각 항목 실제 높이(설명 줄 수 반영, 타이트하게)
     vsizes = []; text_h = []
     for it in items:
-        vv = it["v"]
+        vv = str(it.get("v") or "")
         vsize = fit_size(vv, 15, 12, lambda sz: int(((vw)/(sz*0.017))*2.0))
         lines = wrap_lines(vv, vw, vsize)
         th = lines * (vsize*0.0139*1.55) * 1.3      # 텍스트 자체 높이
@@ -1166,9 +1183,9 @@ def slide_rules(prs, pal, d):
         th = text_h[i]
         cyi = yy + th/2
         rect(s, rx, cyi-0.23, kw, 0.46, pal["pill_bg"], radius=True)
-        txt(s, rx, cyi-0.23, kw, 0.46, [(it["k"], 12.5, True, pal["pill_ink"])],
+        txt(s, rx, cyi-0.23, kw, 0.46, [(str(it.get("k") or ""), 12.5, True, pal["pill_ink"])],
             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-        txt(s, rx+kw+0.28, cyi-th/2-0.05, vw, th+0.1, [(it["v"], vsizes[i], False, INK)],
+        txt(s, rx+kw+0.28, cyi-th/2-0.05, vw, th+0.1, [(str(it.get("v") or ""), vsizes[i], False, INK)],
             line_spacing=1.3, anchor=MSO_ANCHOR.MIDDLE)
         yy += th + gap
     return s
@@ -1215,7 +1232,7 @@ def slide_closing(prs, pal, d):
     s = new_slide(prs)
     cl = d.get("closing", {})
     a = d["academy"]
-    label(s, pal, "상담 안내")
+    label(s, pal, "지도 · 오시는 길")
     # 우 지도
     mx = 6.9
     mw, mh = 11.9+PADX-mx, 4.35
