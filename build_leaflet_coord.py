@@ -75,6 +75,9 @@ PANEL = 100 * MM  # 기준 패널 폭(3.937in) — 내부 여백 계산 기본�
 # 서체는 Pretendard SemiBold 한 가지만 쓴다(Bold/Regular 구분 폐기).
 # python-pptx 는 굵기를 이름으로 지정하므로 패밀리명에 SemiBold 를 박고,
 # run.font.bold 는 항상 False 로 둔다(True 면 SemiBold 위에 인조 굵게가 겹침).
+MIN_BODY = 9.0    # ★리플렛 본문 가독성 하한(pt).
+                  #   실측: 전체 텍스트의 절반이 7.0~8.5pt 로 떨어져 인쇄 시 안 읽혔다.
+                  #   이 아래로는 만들지 않는다. 안 들어가면 <내용을 줄이거나 뺀다>.
 FONT = "Pretendard SemiBold"
 
 # 좌우 여백 기준(모든 패널 공통). 라벨·헤더·본문·번호칩이 이 세로선에 맞춰 정렬된다.
@@ -343,7 +346,47 @@ def _char_w(size):
     return size * 0.0148
 
 
-def _fit_block(text, w_in, max_h, size, *, min_size=7.0, line_spacing=1.10,
+def _trim_to_fit(text, w_in, max_h, size, *, line_spacing=1.10, pad=0.10, sep=" · "):
+    """★가독성 하한(9pt)에 걸리면 글자를 더 줄일 수 없으므로 <내용을 덜어낸다>.
+    여러 항목이 " · " 로 이어진 글이면 뒤 항목부터, 문장이면 뒤 문장부터 뺀다.
+    문장 중간은 자르지 않는다(말이 깨지므로)."""
+    t = _s(text)
+    if not t:
+        return t
+    def fits(v):
+        # ★_fit_size 가 하한(9pt)에서 멈추면 wrapped 가 max_h 를 넘긴 채 돌아온다.
+        #   반환된 크기가 하한이면 줄 수로 직접 판정해야 한다.
+        _sz, wrapped = _fit_size(v, w_in, max_h, size,
+                                 min_size=MIN_BODY, line_spacing=line_spacing)
+        n = wrapped.count("\n") + 1
+        need = n * (_sz * 1.30) / 72.0 + pad
+        return need <= max_h + 0.02
+    if fits(t):
+        return t
+    parts = [x.strip() for x in t.split(sep) if x.strip()]
+    while len(parts) > 1:
+        parts.pop()
+        cand = sep.join(parts)
+        if fits(cand):
+            return cand
+    sents = _sentences(t) if "_sentences" in globals() else [t]
+    while len(sents) > 1:
+        sents.pop()
+        cand = " ".join(sents)
+        if fits(cand):
+            return cand
+    return sents[0] if sents else t
+
+
+def _need_h(text, w_in, size, line_spacing=1.30, pad=0.06):
+    """이 글자 크기로 text 를 담는 데 필요한 상자 높이(inch)."""
+    _sz, wrapped = _fit_size(_s(text), w_in, 99.0, size,
+                             min_size=size, line_spacing=line_spacing)
+    n = wrapped.count("\n") + 1
+    return n * (size * line_spacing) / 72.0 + pad
+
+
+def _fit_block(text, w_in, max_h, size, *, min_size=MIN_BODY, line_spacing=1.10,
                pad=0.10):
     """(size, wrapped, height) 를 돌려준다.
     ★height 는 wrapped 를 담기에 <충분한> 값이다. max_h 로 잘라내지 않는다.
@@ -351,6 +394,8 @@ def _fit_block(text, w_in, max_h, size, *, min_size=7.0, line_spacing=1.10,
        '박스는 작은데 글자는 많은' 상태가 되어 넘침이 났다.)
       호출부는 반환된 height 를 그대로 쓰되, max_h 를 넘겼는지 보고
       글을 줄일지 결정한다."""
+    # ★하한(9pt)에서 멈추면 max_h 를 넘긴 채 돌아온다 → 내용을 덜어내 맞춘다.
+    text = _trim_to_fit(text, w_in, max_h, size, line_spacing=line_spacing, pad=pad)
     size, wrapped = _fit_size(text, w_in, max_h, size,
                               min_size=min_size, line_spacing=line_spacing)
     n = wrapped.count("\n") + 1
@@ -358,7 +403,7 @@ def _fit_block(text, w_in, max_h, size, *, min_size=7.0, line_spacing=1.10,
     return size, wrapped, h
 
 
-def _fit_size(text, w_in, h_in, size, *, min_size=6.5, line_spacing=1.04):
+def _fit_size(text, w_in, h_in, size, *, min_size=MIN_BODY, line_spacing=1.04):
     """박스(w_in × h_in)에 text 전문이 들어가는 최대 글자 크기를 찾는다.
     한 줄에 들어가는 표시 폭 ≈ (박스폭 - 여백) / (글자폭). Pretendard 기준
     글자 1.0폭 ≈ 0.0148in per pt. 잘라내는 대신 크기로 맞춘다.
@@ -428,7 +473,7 @@ def _rect(slide, x, y, w, h, fill=None, line=None, radius=False, line_w=0.75):
 
 def _text(slide, text, x, y, w, h, *, size=11, color="222222", bold=False,
           align=PP_ALIGN.LEFT, valign=MSO_ANCHOR.TOP, line_spacing=1.04,
-          autofit=True, cap=None, fit=True, min_size=6.5):
+          autofit=True, cap=None, fit=True, min_size=MIN_BODY):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame
     tf.word_wrap = True
@@ -438,10 +483,19 @@ def _text(slide, text, x, y, w, h, *, size=11, color="222222", bold=False,
     txt = _s(text)
     if cap:
         txt = _clip(txt, cap)
-    # ★ 잘라내지 않고 크기로 맞춘다 — 문장 잘림(경희궁 사례) 방지.
+    # ★ 크기로 맞추되, 가독성 하한(9pt)에 걸려도 안 들어가면 <내용을 덜어낸다>.
+    #   예전에는 하한 아래로 계속 줄여 7pt 글자가 나왔고, 하한을 걸자 상자를 넘쳤다.
+    #   문장 중간은 자르지 않고 뒤 항목·뒤 문장부터 뺀다.
     if fit and txt:
+        txt = _trim_to_fit(txt, w, h, size, line_spacing=line_spacing, pad=0.02)
         size, txt = _fit_size(txt, w, h, size,
                               min_size=min_size, line_spacing=line_spacing)
+        # ★하한(9pt)에서 멈춰 상자보다 커지면, 글자를 더 줄이는 대신 상자를 늘린다.
+        #   (아래에 여백이 남는 자리이므로 겹치지 않는다. 실측 2건에서 0.07~0.15in 부족했다)
+        _need = (txt.count("\n") + 1) * (size * 1.30) / 72.0 + 0.04
+        if _need > h:
+            h = _need
+            box.height = Inches(h)
     lines = txt.split("\n")
     for i, ln in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -1026,7 +1080,10 @@ def _panel_management(slide, schema, x, c):
     # 카드 높이를 내용 길이로 산출(고정 0.82in 이 길면 잘렸다).
     # 실적 블록이 아래에 붙으므로 그 위까지만 쓰고 여유를 둔다.
     Y0 = max(1.95, sub_y + 0.42)
-    has_ach = bool(_achievement_lines(schema)[1])
+    # ★실적이 <자기 면>을 받았으면 여기 또 넣지 않는다(같은 내용이 두 번 나왔다).
+    #   자리를 못 받았을 때만 하단에 이어 싣는다.
+    _own = schema.get("_ownPanel") or set()
+    has_ach = bool(_achievement_lines(schema)[1]) and ("achievements" not in _own)
     Y_END = 5.72 if has_ach else 7.80
     plan = []
     for txt in steps:
@@ -1047,30 +1104,61 @@ def _panel_management(slide, schema, x, c):
               size=9, color=c["head"], valign=MSO_ANCHOR.MIDDLE, line_spacing=1.08)
         y += bh + gap
 
-    # 실적(있을 때만)
+    # 실적 — ★자기 면을 받았으면 여기 또 넣지 않는다(has_ach 로 판정).
     head, lines = _achievement_lines(schema)
-    if lines:
+    if has_ach and lines:
         _rect(slide, x + LEFT, 5.92, CW, 0.012, fill=c["card_line"])  # 구분선
         _text(slide, _de_emoji(head), x + LEFT, 6.10, CW, 0.28,
               size=10.5, color=c["head"], bold=True)
         # 줄마다 랩된 줄 수를 세어 실제 필요한 높이를 준다(푸터 7.90 위까지).
         body = "\n".join("· " + l for l in lines)
         _text(slide, body, x + LEFT, 6.42, CW, 1.44,
-              size=8, color=c["body"], line_spacing=1.08, min_size=6.0)
+              size=MIN_BODY, color=c["body"], line_spacing=1.20, min_size=MIN_BODY)
 
 
 # ── 예비 패널(대체 섹션) ──────────────────────────────
 def _panel_achievements(slide, schema, x, c):
-    """실적 단독 패널. 앞 섹션이 비어 면이 남을 때 승격되어 들어온다."""
-    head, lines = _achievement_lines(schema)
+    """주요 실적. ★예전에는 '제목 · 변화 — 설명'을 한 줄로 붙여 읽기 어려웠다.
+    제목·변화는 위에 굵게, 설명은 아래 회색 한 줄로 나눠 쓴다."""
+    ach = schema.get("achievements") or {}
+    rows = []
+    for it in _items(ach)[:6]:
+        if not isinstance(it, dict):
+            continue
+        ttl = _de_emoji(_s(it.get("title") or it.get("name")))
+        chg = _de_emoji(_s(it.get("change")))
+        note = _de_emoji(_s(it.get("note") or it.get("desc")))
+        if ttl and note and ttl == note:
+            note = ""
+        if ttl or chg or note:
+            rows.append((ttl, chg, note))
+    if not rows:                       # 구형 데이터 — 줄 목록만 있는 경우
+        _h, lines = _achievement_lines(schema)
+        rows = [(ln, "", "") for ln in lines[:6]]
+    head = _s(ach.get("head")) if isinstance(ach, dict) else ""
     _label(slide, x, "주요 실적", c)
     hb = _header(slide, x, _first(head, default="숫자로 남은\n결과입니다."), c)
     y = max(1.95, hb + 0.18)
-    for ln in lines[:6]:
-        _rect(slide, x + LEFT, y, CW, 0.62, fill=c["soft"], radius=True)
-        _text(slide, ln, x + LEFT + 0.15, y, CW - 0.3, 0.62,
-              size=9.5, color=c["head"], valign=MSO_ANCHOR.MIDDLE)
-        y += 0.76
+    BOTTOM = 7.74
+    for ttl, chg, note in rows:
+        if y > BOTTOM - 0.5:
+            break
+        top_txt = " ".join(v for v in [ttl, chg] if v)
+        th = _need_h(top_txt, CW - 0.36, 10.5, pad=0.04) if top_txt else 0.0
+        nh = _need_h(note, CW - 0.36, MIN_BODY, pad=0.04) if note else 0.0
+        bh = 0.16 + th + (0.03 + nh if note else 0.0) + 0.16
+        bh = min(bh, max(0.5, BOTTOM - y))
+        _rect(slide, x + LEFT, y, CW, bh, fill=c["soft"], radius=True)
+        iy = y + 0.16
+        if top_txt:
+            _text(slide, top_txt, x + LEFT + 0.18, iy, CW - 0.36, th,
+                  size=10.5, color=c["title"], bold=True, min_size=MIN_BODY)
+            iy += th + 0.03
+        if note:
+            _text(slide, note, x + LEFT + 0.18, iy, CW - 0.36,
+                  max(0.18, y + bh - iy - 0.12),
+                  size=MIN_BODY, color=c["body"], min_size=MIN_BODY, line_spacing=1.25)
+        y += bh + 0.18
 
 
 def _panel_rules(slide, schema, x, c):
@@ -1122,14 +1210,17 @@ def _has_rules(s):        return bool(_items(s.get("rules")) or _items(s.get("po
 
 # 우선순위 순. 앞 섹션이 비면 뒤 섹션이 자동으로 앞 면으로 당겨진다(A+C).
 # 표지(_panel_cover)는 위치가 고정이라 이 풀에서 제외한다.
+# ★자리는 5칸인데 실적이 6번이라 <실적 면이 통째로 빠졌다>(더포스둔산 12건 보유).
+#   학부모가 가장 먼저 보는 정보이므로 강점 다음으로 올린다.
+#   FAQ 는 지면을 많이 먹고 상담에서 답할 수 있어 뒤로 보낸다.
 SECTION_POOL = [
     ("admission",    _has_admission,    _panel_admission),
     ("features",     _has_features,     None),   # name 인자 필요 → 아래에서 래핑
+    ("achievements", _has_achievements, _panel_achievements),
     ("curriculum",   _has_curriculum,   _panel_curriculum),
     ("management",   _has_management,   _panel_management),
-    ("faq",          _has_faq,          None),   # name 인자 필요
-    ("achievements", _has_achievements, _panel_achievements),
     ("specials",     _has_specials,     _panel_specials),
+    ("faq",          _has_faq,          None),   # name 인자 필요
     ("rules",        _has_rules,        _panel_rules),
 ]
 
@@ -1155,6 +1246,10 @@ def _pick_sections(schema, slots, name):
         else:
             draw = (lambda f: lambda sl, x, c: f(sl, schema, x, c))(fn)
         picked.append((key, draw))
+    # ★자기 면을 받은 섹션을 여기서 확정한다.
+    #   build() 에서 기록하면 패널이 이미 그려진 뒤라 늦다(실적이 두 번 나왔다).
+    if isinstance(schema, dict):
+        schema["_ownPanel"] = {k for k, _f in picked}
     return picked
 
 
@@ -1186,7 +1281,7 @@ def _panel_combo(slide, schema, x, c, parts):
         body = "\n".join("· " + _s(l) for l in lines)
         bh = max(0.30, (_need((title, lines)) - 0.30) * scale)
         _text(slide, body, x + LEFT, by, CW, bh,
-              size=9, color=c["body"], line_spacing=1.10, min_size=6.5)
+              size=MIN_BODY, color=c["body"], line_spacing=1.20, min_size=MIN_BODY)
         y = by + bh + 0.22 * scale
 
 
@@ -1300,6 +1395,11 @@ def build(schema: Dict[str, Any], palette: str = "sewon_teal",
                                 lambda sl, x, c, _p=parts: _panel_combo(sl, schema, x, c, _p))]
     else:
         picked = cand              # 1~2개: 바깥면만
+
+    # ★어떤 섹션이 <자기 면>을 받았는지 기록한다.
+    #   패널 하단에 같은 내용을 또 붙이지 않기 위해 필요하다(실적이 두 번 나왔다).
+    if isinstance(schema, dict):
+        schema["_ownPanel"] = {k for k, _fn in picked if isinstance(k, str)}
 
     def _draw(slide, idx, x):
         """picked[idx] 를 그린다. 후보가 모자라면 아무것도 안 그림."""

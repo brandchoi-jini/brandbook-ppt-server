@@ -552,7 +552,9 @@ def slide_intro(prs, pal, d):
 
 
 def slide_achievements(prs, pal, d):
-    """주요 실적 — 유형별 카드. 실적 사진이 있으면 하단 띠로 함께 배치."""
+    """주요 실적 — 항목이 많으면 <슬라이드를 나눈다>.
+    ★예전에는 한 장에 밀어 넣어 텍스트가 카드 밖(하단 8.49in)으로 나갔다.
+      슬라이드 높이는 7.5in 이므로 인쇄하면 잘린다."""
     ach = d.get("achievements")
     if not ach: return None
     groups = [g for g in (ach.get("groups") or []) if g.get("items")]
@@ -560,12 +562,29 @@ def slide_achievements(prs, pal, d):
         items = ach.get("items") or []
         if not items: return None
         groups = [{"name": "", "items": items}]
+    MAXI, MAXG = 5, 3          # 카드당 항목 수 / 한 장당 카드 수
+    pages, cur = [], []
+    for g in groups:
+        its = g["items"]
+        for i in range(0, len(its), MAXI):
+            if len(cur) >= MAXG:
+                pages.append(cur); cur = []
+            cur.append({"name": g.get("name",""), "items": its[i:i+MAXI]})
+    if cur: pages.append(cur)
+    last = None
+    for pi, gs in enumerate(pages, 1):
+        last = _achievements_page(prs, pal, d, gs, pi, len(pages))
+    return last
+
+
+def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
+    ach = d.get("achievements") or {}
     s = new_slide(prs)
-    label(s, pal, "주요 실적")
-    header(s, ach.get("head",""), size=26)
+    label(s, pal, _part("주요 실적", pi, parts))
+    header(s, ach.get("head","") if pi == 1 else "", size=26)
 
     imgs = ((d.get("assets") or {}).get("achievements") or [])[:2]
-    top = 2.25 if str(ach.get("head","")).strip() else 1.60
+    top = 2.25 if (pi == 1 and str(ach.get("head","")).strip()) else 1.60
     bottom = 7.05
     band = 0.0
     if imgs:
@@ -610,11 +629,19 @@ def slide_achievements(prs, pal, d):
         area_y0 = y + 0.92
         area_h  = (y + gh - 0.22) - area_y0
         # 각 항목 높이를 내용으로 계산해 블록 전체를 세로 가운데에 둔다
-        _rows = []
-        for it in g["items"]:
-            _n = str(it.get("note") or "")
-            _nl = max(1, wrap_lines(_n, gw-0.76, 11.5)) if _n else 0
-            _rows.append(0.28 + _nl*0.21 + 0.14)
+        # ★높이 계산(11.5pt 고정)과 실제 렌더 크기가 어긋나 카드를 넘쳤다 → 같은 값으로
+        _NSZ = 11.5
+        def _calc(nsz):
+            rs = []
+            for it in g["items"]:
+                _n = str(it.get("note") or "")
+                _nl = max(1, wrap_lines(_n, gw-0.76, nsz)) if _n else 0
+                rs.append(0.30 + _nl*(nsz*0.0139*1.42) + 0.14)
+            return rs
+        _rows = _calc(_NSZ)
+        while sum(_rows) > area_h and _NSZ > 9.0:
+            _NSZ -= 0.5
+            _rows = _calc(_NSZ)
         _blk = sum(_rows)
         rowsy = area_y0 + max(0.0, (area_h - _blk)/2)
         for ii, it in enumerate(g["items"]):
@@ -637,9 +664,10 @@ def slide_achievements(prs, pal, d):
             paras(s, x+0.26, iy2, gw-0.52, 0.30, [runs],
                   align=PP_ALIGN.LEFT, line_spacing=1.15, wrap=True)
             if note:
-                nl = max(1, wrap_lines(note, gw-0.82, 11.5))
-                txt(s, x+0.52, iy2+0.27, gw-0.82, nl*0.26+0.08,
-                    [(note, 11.5, False, "5A6A7A")], align=PP_ALIGN.LEFT, line_spacing=1.26)
+                # ★상자 높이(nl*0.26)와 블록 계산식(nsz*0.0139*1.42)이 달라 항목이 겹쳤다 → 통일
+                nl = max(1, wrap_lines(note, gw-0.82, _NSZ))
+                txt(s, x+0.52, iy2+0.30, gw-0.82, nl*(_NSZ*0.0139*1.42)+0.04,
+                    [(note, _NSZ, False, "5A6A7A")], align=PP_ALIGN.LEFT, line_spacing=1.26)
 
     # 실적 사진 — 별도 장이 아니라 이 페이지의 데코
     if imgs:

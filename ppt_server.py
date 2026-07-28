@@ -14,6 +14,7 @@ import build_brandbook_v3 as B
 import build_brandbook_book as BOOK
 import to_schema_v3 as TS
 import build_leaflet_coord as LEAFLET
+from content_quality import normalize_raw
 from navy_registry import render as skin_render, list_options as navy_options
 
 app = FastAPI()
@@ -33,6 +34,20 @@ def health():
             "palettes": sorted(VALID_PAL), "skins": ["v3", "book", "navy"],
             "navy": navy_options(),
             "leaflet_palettes": ["sewon_teal", "sewon_yellow", "navy_amber"]}
+
+
+@app.post("/validate")
+async def validate(req: Request):
+    """PPT 생성 전에 원본 반영 수와 확인 필요 항목을 반환한다."""
+    try:
+        payload = await req.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    data = payload.get("data") or payload.get("raw") or payload
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "data must be an object"}, status_code=400)
+    normalized = normalize_raw(data)
+    return {"ok": True, "audit": normalized.get("_quality") or {}}
 
 GRADE_KW = {"elem": "초", "mid": "중", "high": "고"}
 

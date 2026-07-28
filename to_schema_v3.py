@@ -5,6 +5,7 @@ build_brandbook_v3.py 가 먹는 스키마(sewon.json 형태)를 만든다.
 빈 섹션은 빈 값으로 두면 빌더가 알아서 슬라이드 생략.
 """
 import re
+from content_quality import normalize_raw
 
 def _g(d, *keys, default=""):
     cur = d
@@ -42,6 +43,7 @@ def _grade_of(name):
 
 def convert(raw, brand=None):
     """raw = 유미니 원본 JSON, brand = 앱 STEP2~5 생성물(slogan/intro 등)"""
+    raw = normalize_raw(raw)
     brand = brand or {}
     basic = raw.get("basic", raw) if isinstance(raw, dict) else {}
     content = raw.get("content", {}) if isinstance(raw, dict) else {}
@@ -84,7 +86,7 @@ def convert(raw, brand=None):
                 features.append({"title": st.get("title",""), "desc": st.get("desc","") or st.get("description","")})
             elif isinstance(st, str):
                 features.append({"title": st[:12], "desc": st})
-    features = features[:6]
+    # 원본 항목은 여기서 자르지 않는다. 페이지 수용량 판단은 빌더가 맡는다.
 
     # 실적
     achievements = brand.get("achievements") or {}
@@ -93,9 +95,13 @@ def convert(raw, brand=None):
         items=[]
         for it in (ach_items or []):
             if isinstance(it, dict):
-                items.append({"icon": it.get("icon","star"), "name": it.get("name",""), "desc": it.get("desc","")})
+                items.append({"icon": it.get("icon","star"),
+                              "name": it.get("name","") or it.get("title","") or it.get("label",""),
+                              "desc": it.get("desc","") or it.get("description","") or it.get("text","")})
+            elif isinstance(it, str) and it.strip():
+                items.append({"icon": "star", "name": "", "desc": it.strip()})
         if items:
-            achievements = {"head":"주요 실적", "items": items[:3]}
+            achievements = {"head":"주요 실적", "items": items}
 
     # 수업 대상(targets): classProfiles/divisions에서 학년별로
     targets = brand.get("targets") or {}
@@ -106,6 +112,13 @@ def convert(raw, brand=None):
             g = _grade_of(cp.get("className","") or cp.get("name",""))
             if g in ("특강","기타"): continue
             by_grade.setdefault(g, []).append(cp.get("className","") or cp.get("name",""))
+        # classProfiles가 불완전해도 실제 개설 수업은 빠뜨리지 않는다.
+        for course in (_g(raw, "courses", default=[]) or []):
+            if not isinstance(course, dict): continue
+            course_name = course.get("name","") or course.get("className","")
+            g = _grade_of(course_name)
+            if g not in ("특강", "기타") and course_name:
+                by_grade.setdefault(g, []).append(course_name)
         order=[("초등","초등부"),("중등","중등부"),("고등","고등부")]
         items=[]
         for key,lab in order:
@@ -166,15 +179,58 @@ def convert(raw, brand=None):
         items=[]
         for i,it in enumerate(sp or []):
             if isinstance(it, dict):
-                items.append({"no": f"{i+1:02d}", "title": it.get("title",""), "desc": it.get("desc","")})
+                items.append({"no": f"{i+1:02d}", "title": it.get("title","") or it.get("name",""),
+                              "desc": it.get("desc","") or it.get("description","")})
+            elif isinstance(it, str) and it.strip():
+                items.append({"no": f"{i+1:02d}", "title": it.strip(), "desc": ""})
         if items:
-            specials={"head":"특별 프로그램","items":items[:4]}
+            specials={"head":"특별 프로그램","items":items}
 
     # 과목별 관리
     management = brand.get("management") or {}
+    if not management:
+        # ★학습관리 = 과제·평가·기준 미달 조치. 출결·결석·퇴원·환불(운영규정)과 섞지 않는다.
+        #   과제(operatingRules.homework)를 규정에서 빼고 여기 넣지 않아 통째로 사라졌었다.
+        _ai_p = _g(raw, "aiProfile", default={}) or {}
+        _cps  = [c for c in (_g(raw, "classProfiles", default=[]) or []) if isinstance(c, dict)]
+        _op   = _g(content, "operatingRules", default={}) or {}
+        _hw   = str(_op.get("homework") or "").strip() if isinstance(_op, dict) else ""
+        _low  = [str(x).strip() for x in (_ai_p.get("lowScorePolicies") or []) if str(x).strip()]
+        _cols = []
+        for cp in _cps:
+            subj = str(cp.get("subject") or "").strip()
+            rows = []
+            hp = cp.get("homeworkPolicy")
+            hp = ([str(x).strip() for x in hp if str(x).strip()] if isinstance(hp, list)
+                  else ([str(hp).strip()] if str(hp or "").strip() else []))
+            if not hp and _hw: hp = [_hw]
+            if hp: rows.append({"k": "과제", "v": " · ".join(hp)})
+            asm = [str(a_.get("type") or "").strip() for a_ in (cp.get("assessments") or [])
+                   if isinstance(a_, dict) and str(a_.get("type") or "").strip()]
+            if asm: rows.append({"k": "평가", "v": " · ".join(dict.fromkeys(asm))})
+            if _low: rows.append({"k": "기준 미달 시", "v": " · ".join(_low)})
+            if rows: _cols.append({"name": subj or "학습관리", "rows": rows})
+        if not _cols and (_hw or _low):
+            rows = []
+            if _hw:  rows.append({"k": "과제", "v": _hw})
+            if _low: rows.append({"k": "기준 미달 시", "v": " · ".join(_low)})
+            _cols = [{"name": "학습관리", "rows": rows}]
+        if _cols:
+            management = {"head": "", "columns": _cols, "style": "auto"}
 
     # 입학절차
     admission = brand.get("admission") or {}
+    if not admission:
+        steps = _g(content, "admissionSteps", default=[]) or []
+        items = []
+        for i, it in enumerate(steps):
+            if isinstance(it, dict):
+                items.append({"no": i+1, "step": it.get("step","") or it.get("title","") or it.get("name",""),
+                              "desc": it.get("desc","") or it.get("description","")})
+            elif isinstance(it, str) and it.strip():
+                items.append({"no": i+1, "step": it.strip(), "desc": ""})
+        if items:
+            admission = {"head": "입학 절차", "items": items}
 
     # 규정
     rules = brand.get("rules") or {}
@@ -192,9 +248,10 @@ def convert(raw, brand=None):
         fq = _g(content,"faq",default=[]) or _g(content,"faqs",default=[])
         items=[]
         for it in (fq or []):
-            if isinstance(it, dict) and it.get("q"):
-                items.append({"q":it.get("q",""),"a":it.get("a","") or it.get("answer","")})
-        if items: faq={"head":"","items":items[:4]}
+            if isinstance(it, dict) and (it.get("q") or it.get("question")):
+                items.append({"q":it.get("q","") or it.get("question",""),
+                              "a":it.get("a","") or it.get("answer","")})
+        if items: faq={"head":"","items":items}
 
     # 마무리
     closing = brand.get("closing") or {
@@ -208,4 +265,5 @@ def convert(raw, brand=None):
         "achievements": achievements, "targets": targets, "curriculum": curriculum,
         "timetables": timetables, "specials": specials, "management": management,
         "admission": admission, "rules": rules, "faq": faq, "closing": closing,
+        "_dataAudit": raw.get("_quality") or {},
     }
