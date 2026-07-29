@@ -285,11 +285,11 @@ def p_results(s, d, P, x):
 
 
 def p_specials(s, d, P, x):
-    """특별 프로그램 패널(예비)."""
+    """특강 및 기타 수업 패널(예비)."""
     items = as_dicts(d.get("specials"))[:5]
     if not items:
         return False
-    head(s, P, x, "특별 프로그램", ["정규 수업 밖에서", "더 채웁니다"])
+    head(s, P, x, "특강 및 기타 수업", ["정규 수업 밖에서", "더 채웁니다"])
     y = 1.55
     for i, it in enumerate(items):
         t = clean(it.get("title") or it.get("name") or "")
@@ -358,14 +358,17 @@ def build(data, out=None, palette=None):
     # ── 데이터 있는 패널만 우선순위대로 뽑는다(빈 패널 방지) ──
     #    표지는 항상 있고, 나머지 5칸(외부2 + 내부3)을 채운다.
     #    앞 섹션이 비면 뒤 섹션이 당겨져 빈 자리가 생기지 않는다.
+    # ★자리는 5칸인데 실적이 6번이라 <실적 면이 통째로 빠졌다>.
+    #   학부모가 가장 먼저 보는 정보이므로 앞으로 올리고,
+    #   FAQ 는 지면을 많이 먹고 상담에서 답할 수 있어 뒤로 보낸다.
     POOL = [
-        ("faq",        _has_faq,        p_faq),
         ("admission",  _has_admission,  p_admission),
+        ("results",    _has_results,    p_results),
         ("philosophy", _has_philosophy, p_philosophy),
         ("curriculum", _has_curriculum, p_curriculum),
         ("management", _has_management, p_management),
-        ("results",    _has_results,    p_results),
         ("specials",   _has_specials,   p_specials),
+        ("faq",        _has_faq,        p_faq),
     ]
     picked = []
     for key, has, fn in POOL:

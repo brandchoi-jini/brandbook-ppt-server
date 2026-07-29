@@ -3,7 +3,7 @@
 build_navy_catalog.py — navy 스킨 카탈로그 (세로 6장)
 판형 8.27 x 11.69in (A4 세로)
 
-구성: [표지] [철학·강점] [커리큘럼] [실적·특별프로그램] [시간표·학습관리] [입학·FAQ·연락처]
+구성: [표지] [철학·강점] [커리큘럼] [실적·특강 및 기타 수업] [시간표·학습관리] [입학·FAQ·연락처]
 데이터 없는 섹션은 건너뛰고, 페이지가 비면 그 장을 만들지 않는다.
 
 입력: v3 표준스키마 (PPT·리플렛과 동일)
@@ -191,7 +191,7 @@ def c_curriculum(prs, d, P, page):
     return s
 
 
-# ── 4. 실적 + 특별프로그램 ──────────────────────────────────────
+# ── 4. 실적 + 특강 및 기타 수업 ──────────────────────────────────────
 def c_results(prs, d, P, page):
     ach = as_dicts(d.get("achievements"))[:3]
     sp = as_dicts(d.get("specials"))[:4]
@@ -223,7 +223,7 @@ def c_results(prs, d, P, page):
         y += ch + 0.5
 
     if sp:
-        add_text(s, ML, y, CW, 0.24, "특별 프로그램", size=FS.small,
+        add_text(s, ML, y, CW, 0.24, "특강 및 기타 수업", size=FS.small,
                  bold=True, color=P["primary"], line_spacing=1.0)
         y += 0.42
         for i, it in enumerate(sp):

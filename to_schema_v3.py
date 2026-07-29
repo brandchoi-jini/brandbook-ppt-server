@@ -30,6 +30,87 @@ def _subjects_str(subj):
         return " · ".join(_SUBJECT_KO.get(x, x) for x in subj)
     return ""
 
+# ── 실적 파싱 ────────────────────────────────────────────
+# ★한 줄에 "A | B | C" 로 뭉쳐 들어오는 실적이 통째로 note 에 박혀
+#   PPT 에서 한 덩어리 회색 글씨로 뭉개졌다. 여기서 잘라 유형별로 나눈다.
+# ★가운뎃점(·)은 '서울대·고려대' 처럼 <병렬 나열>이라 구분자로 쓰면 안 된다.
+#   파이프·세미콜론·줄바꿈만 항목 구분자로 본다.
+_ACH_SPLIT = re.compile(r"\s*[|‖]\s*|\s*[;；]\s*|\n+")
+
+_ACH_KIND = [
+    ("대입 실적",     r"수능|정시|수시|대학|대입|서울대|연세|고려|의대|약대|교대|카이스트|KAIST|SKY|학과\)|최종\s*합격"),
+    ("고입 실적",     r"고입|특목고|자사고|영재고|과학고|외고|국제고|자공고|고교\s*진학"),
+    ("내신·성적 향상", r"내신|등급|점수|평균|만점|100점|\d+\s*점|모의고사|전교|상위권|최상위"),
+    ("성장 사례",     r"성장|입학\s*후|재원|레벨\s*상향|올라|향상|이동|진급"),
+]
+
+def _ach_kind(text):
+    t = text or ""
+    for name, pat in _ACH_KIND:
+        if re.search(pat, t, re.I):
+            return name
+    return "주요 실적"
+
+def _ach_split_line(s):
+    """'2026 서울대 최종 합격 | 동방고 영어 전교 1등 | ...' → 개별 항목 리스트"""
+    parts = [p.strip(" .·-—") for p in _ACH_SPLIT.split(s or "") if p and p.strip(" .·-—")]
+    return [p for p in parts if len(p) > 1]
+
+def _ach_item(text):
+    """한 항목 문자열 → {title, change, note}
+    '동방고 수학 전교 1등 유지 → 직전 시험 100점' 처럼 화살표가 있으면 앞/뒤로 나눈다."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    change = ""
+    m = re.split(r"\s*(?:→|->|⇒|=>)\s*", t, maxsplit=1)
+    if len(m) == 2:
+        t, change = m[0].strip(), m[1].strip()
+    # 괄호 보충 설명은 note 로 뺀다
+    note = ""
+    mb = re.match(r"^(.*?)\s*[(（]([^)）]{4,})[)）]\s*$", t)
+    if mb:
+        t, note = mb.group(1).strip(), mb.group(2).strip()
+    # 제목이 너무 길면 앞부분만 제목, 나머지는 note
+    if len(t) > 26 and not note:
+        cut = t.rfind(" ", 0, 26)
+        if cut > 8:
+            t, note = t[:cut].strip(), (t[cut:].strip() + ((" " + note) if note else ""))
+    return {"title": t, "change": change, "note": note}
+
+def _build_ach_groups(raw_items):
+    """평면 실적 입력 → {head, groups:[{name, items:[{title,change,note}]}]}"""
+    flat = []
+    for it in (raw_items or []):
+        if isinstance(it, dict):
+            base = " ".join(str(it.get(k, "")) for k in
+                            ("name", "title", "label", "desc", "description", "text") if it.get(k))
+            src = base.strip()
+        elif isinstance(it, str):
+            src = it.strip()
+        else:
+            continue
+        if not src:
+            continue
+        for piece in (_ach_split_line(src) or [src]):
+            flat.append(piece)
+    order, buckets = [], {}
+    for piece in flat:
+        item = _ach_item(piece)
+        if not item:
+            continue
+        k = _ach_kind(piece)
+        if k not in buckets:
+            buckets[k] = []
+            order.append(k)
+        # 같은 유형 내 중복 제거
+        if any(x["title"] == item["title"] and x["change"] == item["change"] for x in buckets[k]):
+            continue
+        buckets[k].append(item)
+    groups = [{"name": k, "items": buckets[k]} for k in order if buckets[k]]
+    return groups
+
+
 def _grade_of(name):
     import re as _re
     n = name or ""
@@ -90,18 +171,21 @@ def convert(raw, brand=None):
 
     # 실적
     achievements = brand.get("achievements") or {}
-    if not achievements:
-        ach_items = _g(content,"achievements",default=[]) or _g(basic,"achievements",default=[])
-        items=[]
-        for it in (ach_items or []):
-            if isinstance(it, dict):
-                items.append({"icon": it.get("icon","star"),
-                              "name": it.get("name","") or it.get("title","") or it.get("label",""),
-                              "desc": it.get("desc","") or it.get("description","") or it.get("text","")})
-            elif isinstance(it, str) and it.strip():
-                items.append({"icon": "star", "name": "", "desc": it.strip()})
-        if items:
-            achievements = {"head":"주요 실적", "items": items}
+    # ★brand 쪽에 있어도 groups 가 없으면(=평면 items 뭉치) 여기서 분해·분류한다.
+    #   실적이 PPT 에 안 보이거나 한 덩어리로 뭉개지던 원인.
+    _ach_src = []
+    if achievements:
+        if achievements.get("groups"):
+            _ach_src = []
+        else:
+            _ach_src = achievements.get("items") or []
+    if not _ach_src and not (achievements.get("groups") if achievements else None):
+        _ach_src = _g(content,"achievements",default=[]) or _g(basic,"achievements",default=[])
+    if _ach_src:
+        _groups = _build_ach_groups(_ach_src)
+        if _groups:
+            achievements = {"head": (achievements.get("head") if achievements else "") or "주요 실적",
+                            "groups": _groups}
 
     # 수업 대상(targets): classProfiles/divisions에서 학년별로
     targets = brand.get("targets") or {}
@@ -242,6 +326,73 @@ def convert(raw, brand=None):
             items=[{"k":lab,"v":op[k]} for k,lab in keymap if op.get(k)]
             if items: rules={"head":"학원 관리 지침","items":items}
 
+    def _faq_short(v, limit=90):
+        """★FAQ 답변이 300~580자로 들어와 PPT·리플렛에서 안 읽혔다.
+        문장 단위로 잘라 limit 안으로 줄인다(문장 중간은 자르지 않는다).
+        원문은 STEP6·컨펌 문서에 그대로 남는다."""
+        t = re.sub(r"\s+", " ", str(v or "")).strip()
+        if len(t) <= limit:
+            return t
+        out = ""
+        for sent in re.split(r"(?<=[.!?])\s+", t):
+            if not sent.strip():
+                continue
+            if out and len(out) + len(sent) + 1 > limit:
+                break
+            out = (out + " " + sent).strip()
+        if not out:                      # 한 문장이 이미 길면 절 단위로
+            for sep in ("니다", ",", "·"):
+                idx = t.rfind(sep, 0, limit)
+                if idx > 20:
+                    return t[:idx + len(sep)].strip()
+            return t[:limit].strip()
+        return out
+
+    # ── 시간표 요약 ─────────────────────────────────────────
+    # ★강좌가 104개(더케이)면 표를 그대로 실을 수 없다.
+    #   학년별로 <주N회 · 요일 · 수업시간> 대표 패턴을 뽑아 한 줄로 안내한다.
+    #   예) 중등  주3회 월수금 1시간 30분 · 주2회 화목 2시간
+    def _schedule_summary(raw_):
+        DAY = {"MONDAY":"월","TUESDAY":"화","WEDNESDAY":"수","THURSDAY":"목",
+               "FRIDAY":"금","SATURDAY":"토","SUNDAY":"일"}
+        ORD = {"월":0,"화":1,"수":2,"목":3,"금":4,"토":5,"일":6}
+        def _grade(nm):
+            if re.search(r"초등|초[1-6]|파닉스", nm): return "초등"
+            if re.search(r"중등|중[1-3]|예비중", nm): return "중등"
+            if re.search(r"고등|고[1-3]|수능", nm): return "고등"
+            return ""
+        def _hhm(m):
+            m = int(m or 0)
+            if m <= 0: return ""
+            if m < 60: return f"{m}분"
+            return f"{m//60}시간" + (f" {m%60}분" if m % 60 else "")
+        from collections import Counter, defaultdict
+        buckets = defaultdict(list)
+        for c in (raw_.get("courses") or []):
+            nm = str(c.get("name") or "").strip()
+            if not nm: continue
+            slots = ((c.get("weeklySchedule") or {}).get("slots") or [])
+            days = sorted({DAY.get(s.get("day"), "") for s in slots if s.get("day")},
+                          key=lambda d: ORD.get(d, 9))
+            mins = [s.get("duration_minutes") for s in slots if s.get("duration_minutes")]
+            if not days: continue
+            g = _grade(nm)
+            if not g: continue                      # 학년을 못 읽는 내부용 강좌는 제외
+            buckets[g].append(("".join(days), mins[0] if mins else 0))
+        out = []
+        for g in ("초등", "중등", "고등"):
+            if not buckets.get(g): continue
+            pat = Counter(buckets[g])
+            parts = []
+            for (d, m), _n in pat.most_common(3):
+                t = _hhm(m)
+                parts.append(f"주{len(d)}회 {d}" + (f" {t}" if t else ""))
+            if parts:
+                out.append({"k": f"{g}부", "v": " · ".join(parts)})
+        return out
+
+    _sched = _schedule_summary(raw) if isinstance(raw, dict) else []
+
     # FAQ
     faq = brand.get("faq") or {}
     if not faq:
@@ -249,8 +400,8 @@ def convert(raw, brand=None):
         items=[]
         for it in (fq or []):
             if isinstance(it, dict) and (it.get("q") or it.get("question")):
-                items.append({"q":it.get("q","") or it.get("question",""),
-                              "a":it.get("a","") or it.get("answer","")})
+                items.append({"q": _faq_short(it.get("q","") or it.get("question",""), 40),
+                              "a": _faq_short(it.get("a","") or it.get("answer",""), 90)})
         if items: faq={"head":"","items":items}
 
     # 마무리
@@ -264,6 +415,7 @@ def convert(raw, brand=None):
         "academy": academy, "intro": intro, "features": features,
         "achievements": achievements, "targets": targets, "curriculum": curriculum,
         "timetables": timetables, "specials": specials, "management": management,
+        "schedule": ({"head": "", "items": _sched} if _sched else {}),
         "admission": admission, "rules": rules, "faq": faq, "closing": closing,
         "_dataAudit": raw.get("_quality") or {},
     }

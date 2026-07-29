@@ -376,7 +376,7 @@ def s_curriculum(prs, d, P, page, used=None):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 05. 특별 프로그램 (2x2)
+# 05. 특강 및 기타 수업 (2x2)
 # ══════════════════════════════════════════════════════════════════
 def s_specials(prs, d, P, page, used=None):
     items = as_dicts(d.get("specials"))
@@ -384,7 +384,7 @@ def s_specials(prs, d, P, page, used=None):
         return None
     items = items[:4]
     s = blank_slide(prs)
-    hb = page_head(s, P, "특별 프로그램",
+    hb = page_head(s, P, "특강 및 기타 수업",
               "수업 밖의 시간도 공부하는 힘으로 바꿉니다", None, page)
 
     colw, rowh = 6.15, 2.13

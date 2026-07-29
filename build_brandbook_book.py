@@ -38,6 +38,16 @@ FONT = "Pretendard SemiBold"
 #   한글은 <a:ea>(East Asian) 슬롯을 보므로 이걸 비워두면 테마 기본서체
 #   (Calibri, 한글 글리프 없음)로 떨어져 PowerPoint 가 맑은 고딕 등으로
 #   임의 대체한다. 세 슬롯을 모두 지정해야 지정한 서체가 실제로 나온다.
+
+def _feat_list(x):
+    """★features 가 {items:[...]} 로 오면 슬라이싱에서 KeyError 로 죽었다."""
+    if isinstance(x, dict):
+        x = x.get("items") or []
+    if not isinstance(x, list):
+        return []
+    return [f for f in x if isinstance(f, dict)]
+
+
 def _apply_font(run, name=None):
     name = name or FONT
     run.font.name = name
@@ -333,7 +343,7 @@ def s01_cover(prs, pal, d):
 # 2) SWOT 사분면 (원 + 2x2) — 학원 소개/강점 요약
 def s02_intro(prs, pal, d):
     s = _new(prs)
-    intro = d.get("intro", {}); feats = d.get("features", [])[:4]
+    intro = d.get("intro", {}); feats = _feat_list(d.get("features"))[:4]
     _frame(s, pal, d)
     # 소개 body가 비면(원본만 있고 인터뷰 전) 강점 제목을 한 줄 요약으로 대신
     body = (intro.get("body","") or "").strip()
@@ -377,7 +387,7 @@ def s02_intro(prs, pal, d):
 
 # 3) 원형 연결 4개 (사람 아이콘 + 중앙 플러스 + 하단 캡션) — 네 가지 힘 / 강점
 def s03_four(prs, pal, d):
-    feats = _real_items(d.get("features", []))[:4]
+    feats = _real_items(_feat_list(d.get("features")))[:4]
     n = len(feats)
     if n == 0:
         return None
@@ -653,7 +663,7 @@ def s_timeline(prs, pal, d, label_text, head, summary, items):
     return s
 
 
-# 11) 4박스 2x2 (제목+본문) — 데이터 기반 성장 / 특별 프로그램
+# 11) 4박스 2x2 (제목+본문) — 데이터 기반 성장 / 특강 및 기타 수업
 def s_quad(prs, pal, d, label_text, head, summary, items):
     items = _real_items(items)[:4]
     n = len(items)
@@ -939,8 +949,11 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
 
     ac = data.get("academy", {})
     intro = data.get("intro", {})
-    feats = data.get("features", [])
+    feats = _feat_list(data.get("features"))
     ach = data.get("achievements", {})
+    # ★achievements 가 리스트/문자열로 와도 죽지 않게 정규화한다.
+    if not isinstance(ach, (dict, list)):
+        ach = {}
     targets = data.get("targets", {})
     curr = data.get("curriculum", {})
     specials = data.get("specials", {})
@@ -957,12 +970,33 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
     if feats:
         s03_four(prs, pal, data)
     # 4 정도와 정성 (원형 3단) — 실적 or 강점 상위 3
-    ach_items = ach.get("items", []) if ach else []
-    three = ([{"title":a.get("name",""),"desc":a.get("desc","")} for a in ach_items]
-             or [{"title":f.get("title",""),"desc":f.get("desc","")} for f in feats[:3]])
+    # ★실적이 groups(유형별) 로 오면 items 가 비어 <실적이 통째로 빠졌다>.
+    ach_items = []
+    if isinstance(ach, dict):
+        ach_items = ach.get("items") or []
+        if not ach_items and ach.get("groups"):
+            for _g in (ach.get("groups") or []):
+                if not isinstance(_g, dict):
+                    continue
+                for _it in (_g.get("items") or []):
+                    if isinstance(_it, dict):
+                        _t = str(_it.get("title") or _it.get("name") or "").strip()
+                        _ch = str(_it.get("change") or "").strip()
+                        _nt = str(_it.get("note") or "").strip()
+                        _d = " ".join(v for v in [("→ " + _ch) if _ch else "", _nt] if v)
+                        if _t:
+                            ach_items.append({"name": _t, "desc": _d or _it.get("desc", "")})
+                    elif isinstance(_it, str) and _it.strip():
+                        ach_items.append({"name": _it.strip(), "desc": ""})
+    elif isinstance(ach, list):
+        ach_items = [x if isinstance(x, dict) else {"name": str(x), "desc": ""} for x in ach]
+    three = ([{"title":a.get("name","") or a.get("title",""),"desc":a.get("desc","")}
+              for a in ach_items if isinstance(a, dict)]
+             or [{"title":f.get("title",""),"desc":f.get("desc","")}
+                 for f in (feats or [])[:3] if isinstance(f, dict)])
     if three:
         _three_circles(prs, pal, data, "정도와 정성",
-                       ach.get("head","우리가 만드는\n결과"),
+                       (ach.get("head") if isinstance(ach, dict) else "") or "우리가 만드는\n결과",
                        "정성을 다한 수업이 결과로 이어집니다", three[:3])
     # 4-b 실적 자료 이미지 (담당자가 올린 입결·성적·수상 이미지가 있을 때만)
     _assets = data.get("assets", {}) or {}
@@ -985,11 +1019,21 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
                   targets.get("head","학년별\n맞춤 과정"),
                   "학년에 맞는 과정을 운영합니다",
                   [{"title":it.get("grade",""),"desc":it.get("subj","")} for it in t_items])
-    # 7 깊이 있는 학습 (어두운 카드) — 특별 프로그램 상위 4
-    sp_items = specials.get("items", []) if specials else []
+    # 7 깊이 있는 학습 (어두운 카드) — 특강 및 기타 수업 상위 4
+    # ★항목이 None/문자열로 오면 렌더 단계에서 죽었다 → dict 로 정규화한다.
+    _sp_raw = specials.get("items", []) if isinstance(specials, dict) else (
+        specials if isinstance(specials, list) else [])
+    sp_items = []
+    for _it in (_sp_raw or []):
+        if isinstance(_it, dict):
+            _t = str(_it.get("title") or _it.get("name") or "").strip()
+            if _t:
+                sp_items.append({"title": _t, "desc": str(_it.get("desc") or "")})
+        elif isinstance(_it, str) and _it.strip():
+            sp_items.append({"title": _it.strip(), "desc": ""})
     if sp_items:
         s_darkcard(prs, pal, data, "깊이 있는 학습",
-                   specials.get("head","한 단계\n더 깊게"),
+                   (specials.get("head") if isinstance(specials, dict) else "") or "한 단계\n더 깊게",
                    "심화 프로그램으로 실력을 완성합니다", sp_items[:4])
     # 8 시간표 (그룹 수만큼, 자동 분할)
     for tt in data.get("timetables", []):
@@ -1008,8 +1052,8 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
                    admission.get("head","이렇게\n시작합니다"),
                    "간단한 절차로 시작할 수 있습니다",
                    [{"title":st.get("title",""),"desc":st.get("desc","")} for st in adm_steps])
-    # 11 데이터 기반 성장 (4박스) — 특별 프로그램(있으면 이미 씀) → 강점 하위 4
-    #    특별 프로그램이 없을 때만 강점으로 사분면 채움(중복 방지)
+    # 11 데이터 기반 성장 (4박스) — 특강 및 기타 수업(있으면 이미 씀) → 강점 하위 4
+    #    특강 및 기타 수업이 없을 때만 강점으로 사분면 채움(중복 방지)
     if not sp_items and len(feats) >= 4:
         s_quad(prs, pal, data, "핵심 강점",
                "우리를 만드는\n네 가지 축",
@@ -1033,14 +1077,16 @@ def build(data, palette="teal_blue", out="brandbook_book.pptx"):
                    "수업 진행과 학생 관리 방식을 정리했습니다", mg_cols,
                    style=(mgmt.get("style") or "auto"))
     # 15 학습 로드맵 / 정기 상담 (불릿) — 규정
-    r_items = rules.get("items", []) if rules else []
+    r_items = [x for x in ((rules.get("items") or []) if isinstance(rules, dict) else []) if isinstance(x, dict)]
     if r_items:
         s_bulletlist(prs, pal, data, "학원 규정",
-                     rules.get("head","함께 지키는\n학원 규정"),
+                     (rules.get("head") if isinstance(rules, dict) else "") or "함께 지키는\n학원 규정",
                      "안심하고 맡길 수 있도록 규정을 운영합니다",
-                     [{"title":it.get("k",""),"desc":it.get("v","")} for it in r_items])
+                     [{"title": it.get("k", "") or it.get("title", ""),
+                       "desc": it.get("v", "") or it.get("desc", "")}
+                      for it in r_items if isinstance(it, dict)])
     # FAQ (불릿 리스트) — 있으면
-    f_items = faq.get("items", []) if faq else []
+    f_items = [x for x in ((faq.get("items") or []) if isinstance(faq, dict) else []) if isinstance(x, dict)]
     if f_items:
         s_bulletlist(prs, pal, data, "자주 묻는 질문",
                      faq.get("head","궁금한 점을\n확인하세요"),

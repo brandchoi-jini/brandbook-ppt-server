@@ -31,9 +31,28 @@ def _s(v):
 
 
 def _items(x):
-    """{head, items:[...]} 또는 [...] 둘 다 리스트로."""
+    """{head, items:[...]} 또는 [...] 둘 다 리스트로.
+    ★{head, groups:[{name, items:[...]}]} 형식이 오면 예전에는 빈 리스트가 되어
+      navy 카탈로그·리플렛·PPT 에서 실적이 통째로 빠졌다."""
     if isinstance(x, dict):
         it = x.get("items")
+        if isinstance(it, list) and it:
+            return it
+        if isinstance(x.get("groups"), list):
+            flat = []
+            for g in x["groups"]:
+                if not isinstance(g, dict):
+                    continue
+                for i in (g.get("items") or []):
+                    if isinstance(i, dict):
+                        t = _s(i.get("title") or i.get("name"))
+                        ch = _s(i.get("change"))
+                        nt = _s(i.get("note"))
+                        desc = " ".join(v for v in [("→ " + ch) if ch else "", nt] if v)
+                        flat.append({"name": t, "desc": desc or _s(i.get("desc"))})
+                    elif isinstance(i, str) and i.strip():
+                        flat.append({"name": i.strip(), "desc": ""})
+            return flat
         return it if isinstance(it, list) else []
     if isinstance(x, list):
         return x

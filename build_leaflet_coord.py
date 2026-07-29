@@ -75,10 +75,13 @@ PANEL = 100 * MM  # 기준 패널 폭(3.937in) — 내부 여백 계산 기본�
 # 서체는 Pretendard SemiBold 한 가지만 쓴다(Bold/Regular 구분 폐기).
 # python-pptx 는 굵기를 이름으로 지정하므로 패밀리명에 SemiBold 를 박고,
 # run.font.bold 는 항상 False 로 둔다(True 면 SemiBold 위에 인조 굵게가 겹침).
-MIN_BODY = 9.0    # ★리플렛 본문 가독성 하한(pt).
+BODY = 10.0       # ★본문 기본 크기 — 9pt 는 인쇄에서 작았다
+MIN_BODY = 8.0    # ★리플렛 본문 가독성 하한(pt). 8pt 까지 허용.
                   #   실측: 전체 텍스트의 절반이 7.0~8.5pt 로 떨어져 인쇄 시 안 읽혔다.
                   #   이 아래로는 만들지 않는다. 안 들어가면 <내용을 줄이거나 뺀다>.
 FONT = "Pretendard SemiBold"
+# ★런에 bold 를 안 걸면 뷰어에 따라 굵기가 안 살아난다(전 런 bold=False 였다).
+#   제목·라벨은 bold=True 로 확실히 지정한다.
 
 # 좌우 여백 기준(모든 패널 공통). 라벨·헤더·본문·번호칩이 이 세로선에 맞춰 정렬된다.
 PAD = 0.30            # 패널 안쪽 좌측 여백
@@ -101,10 +104,10 @@ PALETTES = {
         "label": "0AA6B5",      # 섹션 라벨(청록)
         "head": "17345C",       # 헤더(딥네이비)
         "title": "17345C",      # 카드 제목
-        "body": "5C6B76",       # 설명 회색
+        "body": "41505C",       # 설명 — 5C6B76 은 인쇄에서 흐렸다(대비 5.5:1 → 8.3:1)
         "soft": "E8F7F8",       # 연한 박스(FAQ답·관리카드)
         "card_line": "E3E9EE",  # 카드 테두리
-        "footer": "8A97A0",     # 푸터 회색
+        "footer": "6B7884",     # 푸터 — 8A97A0 은 인쇄에서 거의 안 보였다
         "paper": "FFFFFF",
     },
     "sewon_yellow": {
@@ -163,7 +166,10 @@ def _set_font(run, name=None, size=None, bold=False, color=None):
     f.name = name
     if size is not None:
         f.size = Pt(size)
-    f.bold = bool(bold)
+    # ★서체 자체가 SemiBold 다. 여기에 bold=True 를 얹으면 PowerPoint 가
+    #   합성 볼드를 만들어 굵기가 제각각으로 보인다(서체가 오락가락하는 원인).
+    #   위계는 크기와 색으로 준다 → 굵기는 항상 SemiBold 하나로 고정.
+    f.bold = False
     if color is not None:
         f.color.rgb = _rgb(color)
     rPr = run._r.get_or_add_rPr()
@@ -180,6 +186,17 @@ def _s(v: Any, default: str = "") -> str:
         return default
     if isinstance(v, str):
         return re.sub(r"[ \t]+", " ", v).strip() or default
+    # ★dict/list 가 그대로 str() 되어 "{'main': '너의 가능성을…'}" 이 표지에 찍혔다.
+    #   대표 키를 꺼내 문자열로 바꾼다.
+    if isinstance(v, dict):
+        for k in ("main", "text", "title", "head", "value", "v", "name", "desc"):
+            if v.get(k):
+                return _s(v.get(k), default)
+        return default
+    if isinstance(v, (list, tuple)):
+        parts = [_s(x) for x in v]
+        parts = [p for p in parts if p]
+        return " · ".join(parts) or default
     return str(v).strip() or default
 
 
@@ -503,8 +520,10 @@ def _text(slide, text, x, y, w, h, *, size=11, color="222222", bold=False,
         p.line_spacing = line_spacing
         r = p.add_run()
         r.text = ln
-        # SemiBold 단일 서체 — 인조 굵게를 걸지 않는다. 위계는 크기·색으로만 준다.
-        _set_font(r, size=size, bold=False, color=color)
+        # ★bold 인자를 받아놓고 무시하고 있었다(전 런 bold=False).
+        #   세미볼드 단일 서체라 크기·색만으로는 제목이 본문과 구분되지 않는다.
+        #   제목·라벨은 호출부가 준 bold 를 그대로 살린다.
+        _set_font(r, size=size, bold=bool(bold), color=color)
     if autofit:
         try:
             tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
@@ -527,18 +546,65 @@ def _chip(slide, x, y, d, number, c):
     return sh
 
 
+# ── 섹션 헤더 바 ──────────────────────────────────────
+# ★시크릿아카데미 리플렛처럼 <어두운 바>에 제목과 한 줄 설명을 함께 담는다.
+#   예전에는 작은 알약 라벨 + 큰 헤드라인에 1.2in 을 썼는데,
+#   그만큼 본문 자리가 줄어 FAQ·규정이 한두 개만 들어갔다.
+_SEC_SUB = {
+    "상담 · 예약 안내": "문의부터 반 배정까지 진행 순서",
+    "자주 묻는 질문":   "등록 전 많이 물으시는 내용",
+    "우리 학원의 강점": "다른 곳과 다르게 하고 있는 것",
+    "교육 과정":       "학년별로 무엇을 어떻게 하는지",
+    "학습 관리":       "배우고, 확인하고, 끝까지 봅니다",
+    "주요 실적":       "재원생이 만든 결과",
+    "특강 및 기타 수업": "정규 수업 밖에서 더 하는 것",
+    "학원 규정":       "미리 알고 오시면 좋은 기준",
+    "학원 안내":       "한눈에 보는 운영 방식",
+}
+
+def _bar_head(slide, x, title, c, sub=None, y=0.30):
+    """어두운 헤더 바. 그린 뒤 본문 시작 y 를 반환."""
+    t = _s(title)
+    if not t:
+        return y
+    sb = _s(sub) if sub is not None else _SEC_SUB.get(t, "")
+    h = 0.72 if sb else 0.50
+    _rect(slide, x + LEFT, y, CW, h, fill=c["head"], radius=True)
+    _text(slide, t, x + LEFT + 0.20, y + 0.09, CW - 0.40, 0.28,
+          size=12, color=c["paper"], fit=False)
+    if sb:
+        _text(slide, sb, x + LEFT + 0.20, y + 0.39, CW - 0.40, 0.24,
+              size=8.5, color="BFD3E6", fit=False)
+    return y + h + 0.26
+
+
 def _label(slide, x, text, c, dark=False, y=0.33):
-    """섹션 라벨(작게) — 한글만."""
-    _text(slide, text, x + LEFT, y, CW, 0.25,
-          size=9, color=(c["paper"] if dark else c["label"]), bold=True)
+    """섹션 라벨 — ★헤더 문구를 없앤 뒤로 이 라벨이 그 면의 유일한 제목이 됐다.
+    9pt 로는 제목 구실을 못 해, 색 배경 박스에 12pt 로 키운다."""
+    t = _s(text)
+    if not t:
+        return y
+    bw = min(CW, max(1.05, _dwidth(t) * 0.155 + 0.44))
+    if dark:
+        _text(slide, t, x + LEFT, y, CW, 0.30, size=12, color=c["paper"], bold=True)
+    else:
+        _rect(slide, x + LEFT, y, bw, 0.32, fill=c["label"], radius=True)
+        _text(slide, t, x + LEFT, y, bw, 0.32, size=12, color="FFFFFF", bold=True,
+              align=PP_ALIGN.CENTER, valign=MSO_ANCHOR.MIDDLE, fit=False)
+    return y + 0.32
 
 
-def _header(slide, x, text, c, dark=False, y=0.61, max_h=1.30):
+def _header(slide, x, text, c, dark=False, y=0.72, max_h=1.30):
     """대형 헤더. ★실제로 차지한 높이(in)를 반환한다.
     3줄짜리 헤더가 들어오면 0.9in 박스를 넘겨 아래 subhead 와 글자가 겹쳤다
     (경희궁 '레벨 테스트부터 반 배정까지, 네 단계로 안내합니다').
     이제 줄 수만큼 높이를 늘려 잡고, 호출부는 반환값 아래에 다음 요소를 놓는다."""
-    size, wrapped, h = _fit_block(_s(text), CW, max_h, 19.5,
+    # ★헤더 문구가 없으면 자리를 차지하지 않는다.
+    #   예전에는 학원마다 같은 고정 문구("숫자보다 변화의 폭을 봅니다")를 찍었다.
+    t = _s(text)
+    if not t:
+        return y
+    size, wrapped, h = _fit_block(t, CW, max_h, 19.5,
                                   min_size=14.5, line_spacing=1.16, pad=0.10)
     h = max(0.42, h)
     _text(slide, wrapped, x + LEFT, y, CW, h,
@@ -624,14 +690,24 @@ def _curriculum_list(schema):
         items = it.get("items")
         items_txt = ""
         if isinstance(items, list):
-            items_txt = " · ".join(_s(x) for x in items if _s(x))
+            # ★" · " 로 이으면 중1·중2·중3 처럼 <완결된 문장>들이 한 덩어리가 되어
+            #   가독성이 크게 떨어진다. 항목마다 줄을 바꾼다.
+            _its = [_s(x) for x in items if _s(x)]
+            _sent = sum(1 for x in _its if re.search(r"(다|요)\.\s*$", x))
+            items_txt = ("\n".join(_its) if (_sent >= 2 or len(_its) >= 3)
+                         else " · ".join(_its))
         elif isinstance(items, str):
             items_txt = _s(items)
         # 기존 desc/subj 계열도 폴백으로 지원
         desc_fallback = _s(it.get("desc") or it.get("description") or it.get("subj"))
         # 표시용 설명: tag를 위(굵게), items를 아래(상세)로 합침
         desc = tag or desc_fallback
-        detail = items_txt
+        # ★detail 을 items 배열에서만 읽어 <detail 필드가 통째로 무시>됐다.
+        #   교육 과정 면에 '초등 단계 / 개념 다지기' 만 남고 본문이 사라진 원인.
+        detail = items_txt or _s(it.get("detail") or it.get("body") or it.get("text"))
+        # tag 와 desc 가 모두 있으면 desc 는 상세로 내린다(내용 손실 방지)
+        if tag and desc_fallback and desc_fallback != tag and not detail:
+            detail = desc_fallback
         if not (name or desc or detail):
             continue
         out.append({
@@ -666,9 +742,17 @@ def _mgmt_list(schema):
         for key in ("steps", "items", "math", "science"):
             src.extend(_items(mg.get(key)))
     for it in src[:4]:
-        t = _s(it.get("title") or it.get("name") or it.get("desc") or it.get("description"))
-        if t:
-            out.append(t)
+        # ★'title or desc' 라서 제목이 있으면 <설명을 버렸다>.
+        #   '과제'만 남고 '매 수업 후 복습 과제·오답노트 병행' 이 사라졌다.
+        t = _s(it.get("title") or it.get("name") or it.get("k"))
+        d = _s(it.get("desc") or it.get("description") or it.get("v") or it.get("body"))
+        if not d:
+            _sub = it.get("items")
+            if isinstance(_sub, list):
+                d = " · ".join(_s(x) for x in _sub if _s(x))
+        line = f"{t} — {d}" if (t and d) else (t or d)
+        if line:
+            out.append(line)
     return out[:4]
 
 
@@ -715,11 +799,30 @@ def _de_emoji(s):
 
 def _achievement_lines(schema):
     ach = schema.get("achievements") or {}
+    # ★achievements 가 리스트로 바로 오면 .get 에서 죽었다.
+    if not isinstance(ach, dict):
+        ach = {"items": ach if isinstance(ach, list) else []}
     lines = []
-    for it in _items(ach)[:8]:
+    # ★실적이 groups(유형별) 로 오면 _items 가 못 읽어 <실적 면이 통째로 사라졌다>.
+    #   groups 를 평면 항목으로 펼쳐 준다.
+    _src = _items(ach)
+    if not _src and isinstance(ach, dict) and ach.get("groups"):
+        _src = []
+        for g in (ach.get("groups") or []):
+            for it in (g.get("items") or []):
+                t = _s(it.get("title") or it.get("name"))
+                ch = _s(it.get("change"))
+                nt = _s(it.get("note"))
+                _desc = " ".join(x for x in [("→ " + ch) if ch else "", nt] if x)
+                _src.append({"name": t, "desc": _desc})
+    for it in _src[:8]:
         name = _s(it.get("name") or it.get("title"))
         desc = _s(it.get("desc") or it.get("description"))
-        line = " · ".join(x for x in [name, desc] if x)
+        # ★'중1 입학 · → 고3 …' 처럼 가운뎃점과 화살표가 겹쳐 보였다.
+        if desc.startswith(("→", "->", "⇒")):
+            line = f"{name} {desc}".strip() if name else desc
+        else:
+            line = " · ".join(x for x in [name, desc] if x)
         line = _de_emoji(line)
         if not line:
             continue
@@ -751,18 +854,111 @@ def _subject_line(schema):
     return gtext or subj or ""
 
 
+# ── 보조 카드(면 하단 여백을 실제 정보로 채운다) ──────────
+_AUX_TITLE = {"rules": "학원 규정", "faq": "자주 묻는 질문",
+              "specials": "특강 및 기타 수업", "schedule": "수업 요일 · 시간"}
+
+def _aux_rows(schema, key):
+    """보조 카드에 넣을 [(제목, 설명)] 목록."""
+    if key == "rules":
+        src = _items(schema.get("rules")) or _items(schema.get("policy"))
+        return [(_s(i.get("k") or i.get("title")), _s(i.get("v") or i.get("desc")))
+                for i in src if _s(i.get("k") or i.get("title")) or _s(i.get("v") or i.get("desc"))]
+    if key == "faq":
+        return [(i["q"], i["a"]) for i in _faq_list(schema)]
+    if key == "specials":
+        return [(_s(i.get("title") or i.get("name")),
+                 _s(i.get("desc") or i.get("description")))
+                for i in _items(schema.get("specials")) if _s(i.get("title") or i.get("name"))]
+    if key == "schedule":
+        return [(_s(i.get("k")), _s(i.get("v"))) for i in _items(schema.get("schedule")) if _s(i.get("v"))]
+    return []
+
+
+def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
+    """연한 카드 안에 제목(굵게)+설명을 넣는다. 그린 높이를 반환."""
+    rows = [(t, d) for t, d in _aux_rows(schema, key) if t or d]
+    if not rows or (y_bot - y_top) < 0.95:
+        return 0.0
+    IW = CW - 0.44          # 카드 안쪽 폭(렌더와 측정을 같은 값으로)
+    PAD_T, PAD_B, GAP = 0.20, 0.16, 0.14
+    # ★설명까지 넣으면 1개만 들어가는 경우가 많았다(특강 5개 중 1개).
+    #   ①글자 축소 → ②설명 접고 제목만 → 순서로 <전부> 싣는 쪽을 택한다.
+    size, with_desc = BODY, True
+    def _fit(size, with_desc):
+        hs, keep, used = [], [], PAD_T
+        for t, d in rows:
+            th = _need_h(t, IW, size, pad=0.02) if t else 0.0
+            dh = _need_h(d, IW, size, pad=0.02) if (d and with_desc) else 0.0
+            rh = max(0.22, th) + (dh + 0.02 if dh else 0.0) + GAP
+            if 0.32 + used + rh + PAD_B > (y_bot - y_top):
+                break
+            keep.append((t, d if with_desc else "", max(0.22, th), dh)); used += rh
+        return keep, used
+    keep, used = _fit(size, True)
+    while len(keep) < len(rows) and size > MIN_BODY:
+        size -= 0.5
+        keep, used = _fit(size, True)
+    two_col = False
+    if len(keep) < len(rows):
+        size, with_desc = BODY, False
+        keep, used = _fit(size, False)
+        while len(keep) < len(rows) and size > MIN_BODY:
+            size -= 0.5
+            keep, used = _fit(size, False)
+    # ★제목만으로도 다 안 들어가면 2열로 배치해 전부 싣는다(특강 5개 중 3개만 나왔다).
+    if len(keep) < len(rows) and len(rows) >= 4:
+        size = BODY
+        while size > MIN_BODY:
+            _rh = _need_h("가", IW / 2 - 0.10, size, pad=0.02) + 0.10
+            _need_all = PAD_T + _rh * ((len(rows) + 1) // 2) + PAD_B + 0.32
+            if _need_all <= (y_bot - y_top):
+                break
+            size -= 0.5
+        _rh = _need_h("가", IW / 2 - 0.10, size, pad=0.02) + 0.10
+        keep = [(t, "", _rh - 0.10, 0.0) for t, d in rows]
+        used = PAD_T + _rh * ((len(rows) + 1) // 2)
+        two_col = True
+    if not keep:
+        return 0.0
+    card_h = used - GAP + PAD_B
+    _text(slide, _AUX_TITLE.get(key, key), x + LEFT, y_top, CW, 0.26,
+          size=10.5, color=c["label"], bold=True, fit=False)
+    cy = y_top + 0.32
+    _rect(slide, x + LEFT, cy, CW, card_h, fill=c["soft"], radius=True)
+    ry = cy + PAD_T
+    if two_col:
+        colw = IW / 2
+        rows_n = (len(keep) + 1) // 2
+        for i, (t, _d, th, _dh) in enumerate(keep):
+            cxx = x + LEFT + 0.22 + (colw if i >= rows_n else 0.0)
+            cyy = ry + (th + 0.10) * (i - rows_n if i >= rows_n else i)
+            _text(slide, t, cxx, cyy, colw - 0.10, th,
+                  size=size, color=c["title"], min_size=MIN_BODY, fit=False)
+        return 0.32 + card_h
+    for t, d, th, dh in keep:
+        if t:
+            _text(slide, t, x + LEFT + 0.22, ry, IW, th,
+                  size=size, color=c["title"],
+                  min_size=MIN_BODY, line_spacing=1.20)
+            ry += th
+        if d and dh:
+            _text(slide, d, x + LEFT + 0.22, ry + 0.02, IW, dh,
+                  size=size, color=c["body"], min_size=MIN_BODY, line_spacing=1.26)
+            ry += dh + 0.02
+        ry += GAP
+    return 0.32 + card_h
+
+
 # ── 바깥면 패널 ───────────────────────────────────────
 def _panel_admission(slide, schema, x, c):
     ac = schema.get("academy") or {}
     admission = schema.get("admission") or {}
-    _label(slide, x, _first(admission.get("label") if isinstance(admission, dict) else "",
-                            default="상담 · 예약 안내"), c)
-    hb = _header(slide, x, _first(admission.get("head") if isinstance(admission, dict) else "",
-                                  default="아이에게 맞는 시작점을\n함께 찾습니다."), c)
-    sub_y = max(1.38, hb + 0.10)          # 헤더가 3줄이어도 겹치지 않게 아래로 흐름
-    _text(slide, _first(admission.get("subhead") if isinstance(admission, dict) else "",
-                        default="상담 후 적합한 과정을 안내합니다."),
-          x + LEFT, sub_y, CW, 0.31, size=9.5, color=c["body"])
+    hb = _bar_head(slide, x, _first(admission.get("label") if isinstance(admission, dict) else "",
+                                    default="상담 · 예약 안내"), c,
+                   sub=_first(admission.get("subhead") if isinstance(admission, dict) else "",
+                              default="문의부터 반 배정까지 진행 순서"))
+    sub_y = hb - 0.16
 
     steps = _admission_list(schema)
     if not steps:  # 최소 보장(학원 무관 일반 상담 절차 — 세원 특정 아님)
@@ -773,7 +969,10 @@ def _panel_admission(slide, schema, x, c):
         ]
     # ── 단계 수에 맞춰 자동 축소 ──
     # 세로 가용구간: subhead 아래 ~ 5.00(구분선 위). 헤더가 길면 함께 내려간다.
-    Y0, Y_END = max(1.92, sub_y + 0.44), 4.98
+    # ★연락처를 실적 면으로 옮기면 이 면 하단 3인치가 통째로 비었다.
+    #   연락처를 싣지 않는 경우 단계가 면 전체를 쓰도록 끝점을 내린다.
+    _has_contact = "achievements" not in (schema.get("_ownPanel") or set())
+    Y0, Y_END = max(1.92, sub_y + 0.44), (4.98 if _has_contact else 7.30)
     n = max(1, len(steps))
     # 내용 길이에 맞춰 단계별 높이를 배분(고정 pitch 는 04번 설명 3줄에서 넘쳤다)
     t_h0 = 0.29
@@ -785,9 +984,13 @@ def _panel_admission(slide, schema, x, c):
     avail = Y_END - Y0
     scale = min(1.0, avail / total) if total > 0 else 1.0
     tight = scale < 0.92
-    t_size = 11 if not tight else 10
-    d_size = 8.5 if not tight else 8
+    t_size = 11.5 if not tight else 10.5
+    d_size = 9.5 if not tight else 8.5   # ★8.5pt 는 작았다
     chip_d = CHIP if not tight else 0.30
+
+    # ★남는 높이를 간격으로 벌리면 성의 없어 보인다.
+    #   간격은 읽기 좋은 최소치만 주고, 남는 자리는 <학원 규정>으로 채운다.
+    gap_extra = min(0.22, max(0.0, (avail - total) / max(1, len(steps))))
 
     y = Y0
     for i, it in enumerate(steps):
@@ -800,22 +1003,37 @@ def _panel_admission(slide, schema, x, c):
         _text(slide, it["desc"], x + TEXT_X, y + t_h + 0.02,
               TEXT_W, max(0.20, blk - t_h - 0.06), size=d_size, color=c["body"],
               line_spacing=1.06)
-        y += blk
+        y += blk + gap_extra
 
-    # 구분선
-    _rect(slide, x + LEFT, 5.06, CW, 0.012, fill=c["card_line"])
-    phone = _s(ac.get("phone"))
-    _text(slide, f"전화  {phone}" if phone else "전화 상담", x + LEFT, 5.29,
-          CW, 0.29, size=11, color=c["head"], bold=True)
-    loc = _first(ac.get("location"), ac.get("address_short"), default="상담 시 위치를 안내해 드립니다.")
-    _text(slide, loc, x + LEFT, 5.65, CW, 0.9,
-          size=9, color=c["body"])
+    # ── 남는 자리를 보조 카드로 채운다(간격으로 때우지 않는다) ──
+    _aux = (schema.get("_auxAssign") or {}).get("admission")
+    if not _aux:
+        _own2 = schema.get("_ownPanel") or set()
+        for _k in ("rules", "specials", "faq"):
+            if _k not in _own2 and _aux_rows(schema, _k):
+                _aux = _k; break
+    if _aux:
+        _draw_aux_card(slide, schema, x, c, _aux, y + 0.30,
+                       5.74 if _has_contact else 7.56)
+
+    # ── 연락처 (짧게) ───────────────────────────────────
+    # ★실적 면(뒷면)에 연락처·QR 이 이미 들어간다. 여기 또 넣으면
+    #   전화·주소가 두 면에 걸쳐 두 번 나온다 → 실적 면이 없을 때만 싣는다.
+    _own_c = schema.get("_ownPanel") or set()
+    if "achievements" not in _own_c:
+        _rect(slide, x + LEFT, 5.90, CW, 0.012, fill=c["card_line"])
+        phone = _s(ac.get("phone"))
+        _text(slide, f"전화  {phone}" if phone else "전화 상담", x + LEFT, 6.10,
+              CW, 0.28, size=11, color=c["head"], bold=True, fit=False)
+        loc = _first(ac.get("location"), ac.get("address_short"), default="")
+        if loc:
+            lh = min(_need_h(loc, CW, MIN_BODY, pad=0.02), 1.10)
+            _text(slide, loc, x + LEFT, 6.44, CW, lh,
+                  size=MIN_BODY, color=c["body"], min_size=MIN_BODY, line_spacing=1.30)
 
 
 def _panel_faq(slide, schema, x, c, name):
-    _label(slide, x, "자주 묻는 질문", c)
-    hb = _header(slide, x, _first(_s((schema.get("faq") or {}).get("head")
-            if isinstance(schema.get("faq"), dict) else ""), default="자주 묻는 질문"), c)
+    hb = _bar_head(slide, x, "자주 묻는 질문", c)
     faqs = _faq_list(schema)
     if not faqs:
         faqs = [
@@ -825,7 +1043,7 @@ def _panel_faq(slide, schema, x, c, name):
     # ── 답변 전문이 들어가도록 높이를 먼저 배분한다 ──
     # 가용 세로: 1.38 ~ 7.80(푸터 위). 질문·답변 길이에 비례해 나눠 갖고,
     # 총합이 넘치면 전체를 비례 축소한다(글자를 자르지 않는다).
-    Y0, Y_END = max(1.38, hb + 0.14), 7.78
+    Y0, Y_END = max(0.95, hb + 0.20), 7.78
     blocks = []
     for i, it in enumerate(faqs):
         q = f"Q{i+1}. {it['q']}"
@@ -847,10 +1065,11 @@ def _panel_faq(slide, schema, x, c, name):
         box_h = b["box_h"] * scale
         _text(slide, b["q"], x + LEFT, y, CW, q_h + 0.06,
               size=10, color=c["head"], bold=True, line_spacing=1.05)
-        by = y + q_h + 0.08 * scale
-        _rect(slide, x + LEFT, by, CW, box_h, fill=c["soft"], radius=True)
-        _text(slide, b["a"], x + LEFT + 0.15, by, CW - 0.3, box_h,
-              size=8.5, color=c["body"], valign=MSO_ANCHOR.MIDDLE, line_spacing=1.06)
+        by = y + q_h + 0.06 * scale
+        # ★답은 색 상자 대신 왼쪽 세로선으로 구분한다(세원 리플렛 방식)
+        _rect(slide, x + LEFT, by, 0.028, box_h, fill=c["badge"])
+        _text(slide, b["a"], x + LEFT + 0.16, by, CW - 0.20, box_h,
+              size=MIN_BODY, color=c["body"], line_spacing=1.25, min_size=MIN_BODY)
         y = by + box_h + gap
 
 
@@ -971,11 +1190,11 @@ def _panel_cover(slide, schema, x, c, assets, pw=None):
 
 # ── 안쪽면 패널 ───────────────────────────────────────
 def _panel_features(slide, schema, x, c, name):
-    _label(slide, x, f"WHY {name}"[:18] if False else "우리 학원의 강점", c)
+    hb0 = _bar_head(slide, x, "우리 학원의 강점", c)
     feats = _feature_list(schema)
-    head = f"성장을 만드는\n{len(feats)}가지 학습 원칙" if len(feats) >= 2 else "우리 학원의\n학습 원칙"
-    hb = _header(slide, x, _first((schema.get("features_head")), default=head), c)
-    Y0, Y_END = max(1.54, hb + 0.14), 7.80
+    # ★"성장을 만드는 N가지 학습 원칙"은 학원마다 똑같이 찍히는 자동 문구다.
+    #   STEP6 가 만든 헤더가 있을 때만 쓰고, 없으면 헤더 없이 간다.
+    Y0, Y_END = hb0, 7.80
     # 제목이 2줄 되는 항목이 있으므로(예: '1:1 레벨 진단 및 성장 경로 설계')
     # 항목마다 필요한 높이를 재서 배분한다.
     need = []
@@ -985,8 +1204,18 @@ def _panel_features(slide, schema, x, c, name):
         need.append(tl * 0.26 + dl * 0.20 + 0.20)
     total = sum(need)
     avail = Y_END - Y0
+    # ★항목이 적으면 블록을 키워 면을 채운다(간격만 벌리면 성의 없어 보인다).
+    grow = 1.0
+    _has_aux = bool((schema.get("_auxAssign") or {}).get("features"))
+    if (not _has_aux) and total > 0 and total < avail * 0.82:
+        grow = min(1.45, (avail * 0.92) / total)
+        need = [n * grow for n in need]
+        total = sum(need)
     scale = min(1.0, avail / total) if total > 0 else 1.0
-    t_size = 12 if scale >= 0.92 else 11
+    t_size = (12.5 if grow > 1.15 else 12) if scale >= 0.92 else 11
+    # ★간격으로 벌려 채우면 성의 없어 보인다 — 읽기 좋은 최소 간격만 준다.
+    gap_extra = min(0.14 if _has_aux else 0.26,
+                    max(0.0, (avail - total) / max(1, len(feats))))
     y = Y0
     for i, it in enumerate(feats):
         blk = need[i] * scale
@@ -996,9 +1225,47 @@ def _panel_features(slide, schema, x, c, name):
         _text(slide, it["title"], x + TEXT_X, y, TEXT_W, t_h,
               size=t_size, color=c["title"], bold=True, line_spacing=1.08)
         _text(slide, it["desc"], x + TEXT_X, y + t_h + 0.03, TEXT_W,
-              max(0.20, blk - t_h - 0.09), size=8.5, color=c["body"],
+              max(0.20, blk - t_h - 0.09), size=9.5, color=c["body"],
               line_spacing=1.06)
-        y += blk
+        # ★마지막 항목 뒤에도 간격을 더해 y 가 밀려 보조 카드가 안 들어갔다.
+        y += blk + (gap_extra if i < len(feats) - 1 else 0.0)
+
+    # ★강점 4개만 있으면 하단 2.5in 가 통째로 비었다.
+    #   간격을 벌리지 않고 보조 카드(자주 묻는 질문 등)로 채운다.
+    _aux = (schema.get("_auxAssign") or {}).get("features")
+    if not _aux:
+        _own3 = schema.get("_ownPanel") or set()
+        for _k in ("faq", "rules", "specials", "schedule"):
+            if _k not in _own3 and _aux_rows(schema, _k):
+                _aux = _k; break
+    if _aux and y + 0.92 < 7.56:
+        _draw_aux_card(slide, schema, x, c, _aux, y + 0.34, 7.56)
+
+
+# ── 교육 과정 상세를 학년별로 쪼갠다 ────────────────────
+# ★'중1 …다. 중2 …다. 중3 …다.' 가 한 덩어리로 찍혀
+#   학년 구분 없이 빽빽하게 보였다. 학년 표기 앞에서 줄을 나눈다.
+_GRADE_SPLIT = re.compile(r"(?=(?:초|중|고)\s?[1-6](?:\s|·|,))")
+_GRADE_HEAD = re.compile(r"^((?:초|중|고)\s?[1-6])\s*[·,]?\s*(.*)$", re.S)
+
+def _grade_rows(detail):
+    """상세 텍스트 → [(학년라벨, 내용)] . 학년 표기가 없으면 [("", 전체)]."""
+    t = _s(detail)
+    if not t:
+        return []
+    # 줄바꿈이 이미 있으면 그것을 우선 존중한다
+    base = [ln.strip() for ln in t.split("\n") if ln.strip()]
+    out = []
+    for ln in base:
+        parts = [q.strip() for q in _GRADE_SPLIT.split(ln) if q.strip()]
+        if len(parts) <= 1:
+            m = _GRADE_HEAD.match(ln)
+            out.append((m.group(1), m.group(2)) if m else ("", ln))
+            continue
+        for q in parts:
+            m = _GRADE_HEAD.match(q)
+            out.append((m.group(1), m.group(2)) if m else ("", q))
+    return [(g, v) for g, v in out if v or g]
 
 
 def _panel_curriculum(slide, schema, x, c):
@@ -1006,80 +1273,134 @@ def _panel_curriculum(slide, schema, x, c):
     if not cur:
         # 커리큘럼 없으면 패널 라벨·헤더 자체를 안 그림(빈 잔존 없음)
         return
-    _label(slide, x, "교육 과정", c)
-    hb = _header(slide, x, _first(_s((schema.get("curriculum") or {}).get("head")),
-                                  default="단계별로 이어지는\n학습 과정"), c)
+    hb0 = _bar_head(slide, x, "교육 과정", c)
     cin = 0.18  # 카드 내부 여백
-    y = max(1.73, hb + 0.20)
+    y = hb0
     # 카드 높이를 내용 길이로 산출하고, 넘치면 비례 축소(글자 안 자름)
-    # 아래에 특별 프로그램 블록이 붙으면 그 위에서 멈춘다.
+    # 아래에 특강 및 기타 수업 블록이 붙으면 그 위에서 멈춘다.
     _has_sp = bool(_items(schema.get("specials")))
-    Y_END = 6.80 if _has_sp else 7.78
+    # ★아래에 <수업 요일·시간>과 특강 및 기타 수업이 붙으므로 그 위에서 멈춘다
+    _has_sch = bool(_items(schema.get("schedule")))
+    # ★4.90 으로 묶어 학년 행이 시간표와 겹쳤다. 특강은 이 면에서 빠졌으므로
+    #   시간표 자리(약 1.9in)만 남기고 나머지를 커리큘럼에 준다.
+    # 시간표(제목+2행)에 약 1.3in 을 남긴다 — 중등부 행이 잘렸다.
+    Y_END = (6.05 if _has_sch else 7.78)
     txt_w = CW - cin * 2
+    # ★렌더는 _need_h(실측)로 그리는데 계획은 scale 로만 줄여서
+    #   내용이 지면을 넘고 시간표가 밀려났다. 여기서 <크기>를 정해 둔다.
+    _CSZ = BODY
+    def _cur_total(csz):
+        tot = 0.0
+        for _it in cur:
+            _nm = _s(_it["name"]); _ds = _s(_it.get("desc"))
+            hh = (_need_h(_nm, CW, 10.5, pad=0.02) if _nm else 0.0) + 0.04
+            if _ds:
+                hh += _need_h(_ds, CW, 10.5, pad=0.02) + 0.03
+            for _g, _v in _grade_rows(_it.get("detail")):
+                hh += _need_h(_v, (CW - 0.52) if _g else CW, csz, pad=0.02) + 0.07
+            tot += hh + 0.30
+        return tot
+    # ★8pt 까지 떨어져 이 면만 유독 작았다 → 9.5pt 아래로는 줄이지 않는다.
+    while _CSZ > 9.5 and _cur_total(_CSZ) > (Y_END - y):
+        _CSZ -= 0.5
     plan = []
     for it in cur:
         d_lines = max(1, int(_dwidth(it.get("desc") or "") / 20) + 1) if it.get("desc") else 0
-        t_lines = max(1, int(_dwidth(it.get("detail") or "") / 24) + 1) if it.get("detail") else 0
-        h = 0.56 + d_lines * 0.24 + t_lines * 0.20 + 0.16
+        _dt = _s(it.get("detail"))
+        # ★학년별로 행이 나뉘므로 행마다 높이를 잡는다(한 덩어리 계산은 어긋났다).
+        _gr = _grade_rows(_dt)
+        t_h = 0.0
+        for _g, _v in _gr:
+            _w = (CW - 0.52) if _g else CW
+            t_h += _need_h(_v, _w, _CSZ, pad=0.02) + 0.07
+        h = 0.56 + d_lines * 0.24 + t_h + 0.16
         # ★1.05in 최소높이를 두면 내용 2줄짜리 초등 카드가 과하게 커져
         #   중등 카드와 균형이 깨졌다(경희궁). 내용만큼만 준다.
-        plan.append({"it": it, "h": max(0.82, h), "d": d_lines, "t": t_lines})
+        plan.append({"it": it, "h": max(0.82, h), "d": d_lines, "t": t_h})
     GAP = 0.35
     total = sum(p["h"] for p in plan) + GAP * max(0, len(plan) - 1)
     avail = Y_END - y
     scale = min(1.0, avail / total) if total > 0 else 1.0
     gap = GAP * scale
 
-    for p in plan:
+    # ★세원 리플렛 방식 — 카드 테두리·pill 을 걷어내고
+    #   단계명(컬러 굵게) + 목표 + 상세를 얇은 구분선으로만 나눈다.
+    for idx, p in enumerate(plan):
         it, ch = p["it"], p["h"] * scale
-        _rect(slide, x + LEFT, y, CW, ch, fill="FFFFFF",
-              line=c["card_line"], radius=True)
-        # 라벨 pill: 글자 폭에 맞춰 너비 산출(고정 0.79in 이면 '초등 단계'가 줄바꿈됨)
-        pill_txt = _s(it["name"])
-        pill_w = min(CW - cin * 2, max(0.72, _dwidth(pill_txt) * 0.115 + 0.30))
-        _rect(slide, x + LEFT + cin, y + 0.19, pill_w, 0.29, fill=c["accent2"], radius=True)
-        _text(slide, pill_txt, x + LEFT + cin, y + 0.19, pill_w, 0.29,
-              size=9.5, color="FFFFFF", bold=True, align=PP_ALIGN.CENTER,
-              valign=MSO_ANCHOR.MIDDLE, fit=False)
-        cy = y + 0.56
-        # 목표 한마디
+        if idx:
+            _rect(slide, x + LEFT, y, CW, 0.010, fill=c["card_line"])
+            y += 0.14
+        nm = _s(it["name"])
+        nh = _need_h(nm, CW, 10.5, pad=0.02) if nm else 0.0
+        if nm:
+            _text(slide, nm, x + LEFT, y, CW, nh,
+                  size=10.5, color=c["label"], bold=True, fit=False)
+        cy = y + nh + 0.04
         if it.get("desc"):
-            dh = max(0.24, p["d"] * 0.24 * scale)
-            _text(slide, it["desc"], x + LEFT + cin, cy, txt_w, dh,
-                  size=10.5, color=c["head"], bold=True)
-            cy += dh
-        # 반·과목 상세
+            dh = _need_h(_s(it["desc"]), CW, 10.5, pad=0.02)
+            _text(slide, it["desc"], x + LEFT, cy, CW, dh,
+                  size=10.5, color=c["title"], bold=True, min_size=MIN_BODY)
+            cy += dh + 0.03
         if it.get("detail"):
-            th = max(0.20, p["t"] * 0.20 * scale)
-            _text(slide, it["detail"], x + LEFT + cin, cy, txt_w, th,
-                  size=8.5, color=c["body"])
-        y += ch + gap
+            GW = 0.52          # 학년 라벨 칼럼 폭
+            for _g, _v in _grade_rows(it["detail"]):
+                if _g:
+                    _vh = _need_h(_v, CW - GW, _CSZ, pad=0.02)
+                    _text(slide, _g, x + LEFT, cy, GW - 0.06, 0.26,
+                          size=_CSZ, color=c["badge"], fit=False)
+                    _text(slide, _v, x + LEFT + GW, cy, CW - GW, _vh,
+                          size=_CSZ, color=c["body"], min_size=MIN_BODY,
+                          line_spacing=1.32)
+                    cy += _vh + 0.07
+                else:
+                    _vh = _need_h(_v, CW, _CSZ, pad=0.02)
+                    _text(slide, _v, x + LEFT, cy, CW, _vh,
+                          size=_CSZ, color=c["body"], min_size=MIN_BODY,
+                          line_spacing=1.32)
+                    cy += _vh + 0.07
+        y = max(cy, y + ch) + 0.10
 
-    # 특별 프로그램(있을 때만)
-    specials = _items(schema.get("specials"))
-    stext = " · ".join(_s(s.get("title") or s.get("name"))
-                       for s in specials if _s(s.get("title") or s.get("name")))
-    if stext:
-        _rect(slide, x + LEFT, 6.92, CW, 0.012, fill=c["card_line"])  # 구분선
-        _text(slide, _first(_s((schema.get("specials") or {}).get("head")), default="특별 프로그램"),
-              x + LEFT, 7.08, CW, 0.25, size=9, color=c["label"], bold=True)
-        _text(slide, stext, x + LEFT, 7.36, CW, 0.46,
-              size=8.5, color=c["body"])
+    # ── 수업 요일 · 시간 (교육 과정 아래) ────────────────
+    # ★강좌가 100개 넘는 학원은 표를 실을 수 없다(더케이 104개).
+    #   학년별 대표 운영 패턴을 요약해 교육 과정 바로 아래에 둔다.
+    sched = _items(schema.get("schedule"))
+    if sched:
+        # ★커리큘럼 끝과 간격이 벌어져 시간표 행이 잘렸다 → 바짝 붙인다.
+        sy0 = max(y + 0.02, 5.10)
+        _rect(slide, x + LEFT, sy0, CW, 0.012, fill=c["card_line"])
+        _label(slide, x, "수업 요일 · 시간", c, y=sy0 + 0.10)
+        sy = sy0 + 0.48
+        LIM = 7.80   # ★특강 블록을 뺐으므로 하단까지 쓴다(중등부가 잘렸다)
+        for it in sched[:3]:
+            k = _s(it.get("k")); v = _s(it.get("v"))
+            if not v: continue
+            v = " · ".join([p_.strip() for p_ in v.split("·") if p_.strip()][:2])
+            vh = _need_h(v, CW - 0.82, 9.5, pad=0.02)
+            if sy + vh > LIM:
+                break
+            # ★MIN_BODY(8pt)로 찍혀 시간표만 눈에 띄게 작았다 → 본문 크기로.
+            _text(slide, k, x + LEFT, sy, 0.78, max(0.20, vh),
+                  size=9.5, color=c["label"], fit=False)
+            _text(slide, v, x + LEFT + 0.82, sy, CW - 0.82, vh,
+                  size=9.5, color=c["body"], min_size=9.0, line_spacing=1.22)
+            sy += vh + 0.09
+
+    # ★특강을 교육 과정 면 하단 자투리(약 1.1in)에 밀어 넣으니
+    #   5개 중 1개만 나오고 '수업 요일·시간'까지 잘렸다.
+    #   특강은 전용 면이나 '한눈에 보기' 면에서 전부 보여준다 → 여기서는 싣지 않는다.
 
 
 def _panel_management(slide, schema, x, c):
     steps = _mgmt_list(schema)
-    _label(slide, x, "학습 관리", c)
-    hb = _header(slide, x, _first(_s((schema.get("management") or {}).get("head")),
-                                  default="진도보다 이해를\n먼저 확인합니다."), c)
-    sub_y = max(1.48, hb + 0.10)
+    hb0 = _bar_head(slide, x, "학습 관리", c)
+    sub_y = hb0 - 0.10
     if steps:
         _text(slide, _first(_s((schema.get("management") or {}).get("subhead")),
                             default=f"학습 관리 {len(steps)} STEP"),
               x + LEFT, sub_y, CW, 0.27, size=9.5, color=c["body"], bold=True)
     # 카드 높이를 내용 길이로 산출(고정 0.82in 이 길면 잘렸다).
     # 실적 블록이 아래에 붙으므로 그 위까지만 쓰고 여유를 둔다.
-    Y0 = max(1.95, sub_y + 0.42)
+    Y0 = max(0.95, sub_y + 0.30)
     # ★실적이 <자기 면>을 받았으면 여기 또 넣지 않는다(같은 내용이 두 번 나왔다).
     #   자리를 못 받았을 때만 하단에 이어 싣는다.
     _own = schema.get("_ownPanel") or set()
@@ -1094,14 +1415,29 @@ def _panel_management(slide, schema, x, c):
     avail = Y_END - Y0
     scale = min(1.0, avail / total) if total > 0 else 1.0
     gap = GAP * scale
+    # 간격은 최소치만(과도하게 벌리면 성의 없어 보인다)
+    gap += min(0.24, max(0.0, (avail - total) / max(1, len(plan))))
 
+    # ★세원 리플렛 방식 — 색 카드를 깔지 않고 번호 + 글로만 정리한다.
     y = Y0
     for i, p in enumerate(plan):
         bh = p["h"] * scale
-        _chip(slide, x + LEFT, y + 0.04, CHIP, str(i + 1), c)
-        _rect(slide, x + TEXT_X, y, TEXT_W, bh, fill=c["soft"], radius=True)
-        _text(slide, p["txt"], x + TEXT_X + 0.15, y, TEXT_W - 0.3, bh,
-              size=9, color=c["head"], valign=MSO_ANCHOR.MIDDLE, line_spacing=1.08)
+        _chip(slide, x + LEFT, y + 0.02, CHIP, str(i + 1), c)
+        _txt = _s(p["txt"])
+        _k, _v = "", _txt
+        _m = re.match(r"^\s*([^:：—–]{2,14})\s*[:：—–]\s*(.+)$", _txt)
+        if _m:
+            _k, _v = _m.group(1).strip(), _m.group(2).strip()
+        if _k:
+            kh = _need_h(_k, TEXT_W, 10.5, pad=0.02)
+            _text(slide, _k, x + TEXT_X, y, TEXT_W, kh,
+                  size=10.5, color=c["title"], bold=True, min_size=MIN_BODY, fit=False)
+            vh = max(0.20, bh - kh - 0.02)
+            _text(slide, _v, x + TEXT_X, y + kh + 0.02, TEXT_W, vh,
+                  size=BODY, color=c["body"], min_size=MIN_BODY, line_spacing=1.34)
+        else:
+            _text(slide, _v, x + TEXT_X, y, TEXT_W, bh,
+                  size=BODY, color=c["body"], min_size=MIN_BODY, line_spacing=1.34)
         y += bh + gap
 
     # 실적 — ★자기 면을 받았으면 여기 또 넣지 않는다(has_ach 로 판정).
@@ -1118,55 +1454,126 @@ def _panel_management(slide, schema, x, c):
 
 # ── 예비 패널(대체 섹션) ──────────────────────────────
 def _panel_achievements(slide, schema, x, c):
-    """주요 실적. ★예전에는 '제목 · 변화 — 설명'을 한 줄로 붙여 읽기 어려웠다.
-    제목·변화는 위에 굵게, 설명은 아래 회색 한 줄로 나눠 쓴다."""
+    """주요 실적 — ★3단 접지에서 <뒷면>이 되는 면.
+    손에 들었을 때 바로 보이므로 실적은 <한 줄씩 제목만> 싣고,
+    남는 자리에 연락처와 약도 QR 을 둔다(설명까지 넣으면 줄이 길어져 자리가 없다)."""
     ach = schema.get("achievements") or {}
-    rows = []
-    for it in _items(ach)[:6]:
-        if not isinstance(it, dict):
+    if not isinstance(ach, dict):
+        ach = {"items": ach if isinstance(ach, list) else []}
+    ac = schema.get("academy") or {}
+
+    # ★to_schema 가 실적을 <대입/고입/내신/성장> 유형으로 분류해 두는데
+    #   _items() 로 평탄화해 유형을 버리고 긴 문장만 나열했다.
+    #   시크릿 리플렛처럼 유형별 소제목 + 항목으로 묶어 훑어보게 만든다.
+    groups = []
+    for g in (ach.get("groups") or []):
+        if not isinstance(g, dict):
             continue
-        ttl = _de_emoji(_s(it.get("title") or it.get("name")))
-        chg = _de_emoji(_s(it.get("change")))
-        note = _de_emoji(_s(it.get("note") or it.get("desc")))
-        if ttl and note and ttl == note:
-            note = ""
-        if ttl or chg or note:
-            rows.append((ttl, chg, note))
-    if not rows:                       # 구형 데이터 — 줄 목록만 있는 경우
-        _h, lines = _achievement_lines(schema)
-        rows = [(ln, "", "") for ln in lines[:6]]
-    head = _s(ach.get("head")) if isinstance(ach, dict) else ""
-    _label(slide, x, "주요 실적", c)
-    hb = _header(slide, x, _first(head, default="숫자로 남은\n결과입니다."), c)
-    y = max(1.95, hb + 0.18)
-    BOTTOM = 7.74
-    for ttl, chg, note in rows:
-        if y > BOTTOM - 0.5:
+        gname = _de_emoji(_s(g.get("name")))
+        gitems = []
+        for it in (g.get("items") or []):
+            if not isinstance(it, dict):
+                if isinstance(it, str) and it.strip():
+                    gitems.append((it.strip(), ""))
+                continue
+            ttl = _de_emoji(_s(it.get("title") or it.get("name")))
+            chg = _de_emoji(_s(it.get("change")))
+            if ttl or chg:
+                gitems.append((ttl, chg))
+        if gitems:
+            groups.append((gname, gitems))
+    if not groups:
+        flat = []
+        for it in _items(ach)[:8]:
+            if not isinstance(it, dict):
+                continue
+            ttl = _de_emoji(_s(it.get("title") or it.get("name")))
+            chg = _de_emoji(_s(it.get("change")))
+            if ttl or chg:
+                flat.append((ttl, chg))
+        if not flat:
+            _h, lines = _achievement_lines(schema)
+            flat = [(ln, "") for ln in lines[:8]]
+        if flat:
+            groups = [("", flat)]
+
+    hb0 = _bar_head(slide, x, "주요 실적", c)
+    y = hb0
+
+    QW, FOOT = 0.56, 7.74
+    qy = FOOT - QW - 0.06                 # QR 줄
+    cy = qy - 0.94                        # 연락처 블록 시작
+    LIMIT = cy - 0.18                     # 실적은 여기까지만
+    AV = LIMIT - y
+
+    GH, PADC, GAPI, GAPG = 0.26, 0.14, 0.09, 0.15   # 소제목·카드여백·항목·그룹 간격
+    def _measure(sz, arrow=True):
+        out, tot = [], 0.0
+        for gname, items in groups:
+            hs = []
+            for ttl, chg in items:
+                line = (ttl + ("  →  " + chg if (chg and arrow) else
+                               ("  " + chg if chg else "")))
+                hs.append((line, _need_h(line, CW - PADC * 2 - 0.12, sz, pad=0.02)))
+            card = PADC + sum(h for _l, h in hs) + GAPI * max(0, len(hs) - 1) + PADC
+            out.append((gname, hs, card))
+            tot += (GH if gname else 0.0) + card + GAPG
+        return out, (tot - GAPG if out else 0.0)
+
+    _sz = 10.0
+    meas, tot = _measure(_sz)
+    while tot > AV and _sz > 8.0:
+        _sz -= 0.5
+        meas, tot = _measure(_sz)
+
+    for gname, hs, card_h in meas:
+        if y + (GH if gname else 0.0) + card_h > LIMIT + 0.12:
             break
-        top_txt = " ".join(v for v in [ttl, chg] if v)
-        th = _need_h(top_txt, CW - 0.36, 10.5, pad=0.04) if top_txt else 0.0
-        nh = _need_h(note, CW - 0.36, MIN_BODY, pad=0.04) if note else 0.0
-        bh = 0.16 + th + (0.03 + nh if note else 0.0) + 0.16
-        bh = min(bh, max(0.5, BOTTOM - y))
-        _rect(slide, x + LEFT, y, CW, bh, fill=c["soft"], radius=True)
-        iy = y + 0.16
-        if top_txt:
-            _text(slide, top_txt, x + LEFT + 0.18, iy, CW - 0.36, th,
-                  size=10.5, color=c["title"], bold=True, min_size=MIN_BODY)
-            iy += th + 0.03
-        if note:
-            _text(slide, note, x + LEFT + 0.18, iy, CW - 0.36,
-                  max(0.18, y + bh - iy - 0.12),
-                  size=MIN_BODY, color=c["body"], min_size=MIN_BODY, line_spacing=1.25)
-        y += bh + 0.18
+        if gname:
+            _text(slide, gname, x + LEFT, y, CW, 0.26,
+                  size=9.5, color=c["label"], fit=False)
+            y += GH
+        _rect(slide, x + LEFT, y, CW, card_h, fill=c["soft"], radius=True)
+        iy = y + PADC
+        for line, hh in hs:
+            _text(slide, line, x + LEFT + PADC, iy, CW - PADC * 2, hh,
+                  size=_sz, color=c["title"], min_size=8.0, line_spacing=1.22)
+            iy += hh + GAPI
+        y += card_h + GAPG
+
+    # ── 연락처 ─────────────────────────────────────────
+    _rect(slide, x + LEFT, cy, CW, 0.012, fill=c["card_line"])
+    phone = _s(ac.get("phone"))
+    _text(slide, f"전화  {phone}" if phone else "전화 상담", x + LEFT, cy + 0.16,
+          CW, 0.28, size=11, color=c["head"], bold=True, fit=False)
+    loc = _first(ac.get("location"), ac.get("address_short"), default="")
+    if loc:
+        _avail = qy - 0.14 - (cy + 0.50)
+        if _avail >= 0.20:
+            lh = min(_need_h(loc, CW, MIN_BODY, pad=0.02), _avail)
+            _maxln = max(1, int((lh - 0.04) / (MIN_BODY * 1.30 / 72.0)))
+            _per = max(6, int((CW - 0.10) / (MIN_BODY * 0.0148)))
+            _ls = _wrap(loc, _per).split("\n")
+            if len(_ls) > _maxln:
+                loc = " ".join(_ls[:_maxln]).rstrip(" ,·") + "…"
+            _text(slide, loc, x + LEFT, cy + 0.50, CW, lh, fit=False,
+                  size=MIN_BODY, color=c["body"], line_spacing=1.30)
+
+    # ── 약도 QR (네이버 · 카카오) ────────────────────────
+    for i, lb in enumerate(("네이버", "카카오")):
+        qx = x + LEFT + i * (CW / 2)
+        _rect(slide, qx, qy, QW, QW, fill="FFFFFF", line=c["card_line"], radius=True)
+        _text(slide, "QR", qx, qy, QW, QW, size=MIN_BODY, color=c["footer"],
+              align=PP_ALIGN.CENTER, valign=MSO_ANCHOR.MIDDLE, fit=False)
+        _text(slide, lb, qx + QW + 0.06, qy + 0.16, CW / 2 - QW - 0.10, 0.26,
+              size=MIN_BODY, color=c["body"], fit=False)
 
 
 def _panel_rules(slide, schema, x, c):
     """학원 규정 패널(예비)."""
     rules = _items(schema.get("rules")) or _items(schema.get("policy"))
-    _label(slide, x, "학원 안내", c)
-    hb = _header(slide, x, "함께 지키는\n약속입니다.", c)
-    y = max(1.95, hb + 0.18)
+    hb = _bar_head(slide, x, "학원 규정", c)
+    y = hb
     for it in rules[:6]:
         k = _s(it.get("k") or it.get("title") or it.get("name"))
         v = _s(it.get("v") or it.get("desc") or it.get("body"))
@@ -1181,12 +1588,10 @@ def _panel_rules(slide, schema, x, c):
 
 
 def _panel_specials(slide, schema, x, c):
-    """특별 프로그램 단독 패널(예비)."""
+    """특강 및 기타 수업 단독 패널(예비)."""
     sp = _items(schema.get("specials"))
-    _label(slide, x, "특별 프로그램", c)
-    hb = _header(slide, x, _first(_s((schema.get("specials") or {}).get("head")),
-                                  default="정규 수업 밖에서\n더 채웁니다."), c)
-    y = max(1.95, hb + 0.18)
+    hb0 = _bar_head(slide, x, "특강 및 기타 수업", c)
+    y = hb0
     for i, it in enumerate(sp[:5]):
         t = _s(it.get("title") or it.get("name"))
         d = _s(it.get("desc") or it.get("description"))
@@ -1213,16 +1618,98 @@ def _has_rules(s):        return bool(_items(s.get("rules")) or _items(s.get("po
 # ★자리는 5칸인데 실적이 6번이라 <실적 면이 통째로 빠졌다>(더포스둔산 12건 보유).
 #   학부모가 가장 먼저 보는 정보이므로 강점 다음으로 올린다.
 #   FAQ 는 지면을 많이 먹고 상담에서 답할 수 있어 뒤로 보낸다.
+# ★3단 접지에서 읽는 순서
+#     표지(바깥 우) → 강점(바깥 좌) → 안쪽 실적·교육과정·학습관리 → 상담·예약(바깥 중, 뒷면)
+#   예전에는 상담·예약이 바깥 좌라 안으로 접혀 들어가고 강점이 뒷면이 됐다.
+#   연락처·상담 안내는 뒷면에 있어야 손에 들었을 때 바로 보인다.
 SECTION_POOL = [
-    ("admission",    _has_admission,    _panel_admission),
-    ("features",     _has_features,     None),   # name 인자 필요 → 아래에서 래핑
-    ("achievements", _has_achievements, _panel_achievements),
+    ("admission",    _has_admission,    _panel_admission),      # 바깥 좌 (안으로 접히는 면)
+    ("achievements", _has_achievements, _panel_achievements),   # 바깥 중 = 뒷면 (실적+연락처+QR)
+    ("features",     _has_features,     None),                  # 안쪽 좌 — name 인자 필요
     ("curriculum",   _has_curriculum,   _panel_curriculum),
+    ("faq",          _has_faq,          None),   # name 인자 필요
+    #   ★FAQ 는 답변이 길어 카드로 접으면 1~2개만 들어간다 → 전용 면을 준다.
     ("management",   _has_management,   _panel_management),
     ("specials",     _has_specials,     _panel_specials),
-    ("faq",          _has_faq,          None),   # name 인자 필요
     ("rules",        _has_rules,        _panel_rules),
 ]
+
+
+# ── 면 균형 배치 ────────────────────────────────────────
+# ★어떤 면은 빽빽하고 어떤 면은 하단이 통째로 비었다(상담·예약 면).
+#   섹션마다 필요한 높이를 먼저 재서, 넘치는 섹션은 <다음 면으로 나누고>
+#   남는 면에는 짧은 섹션을 이어 붙인다.
+PANEL_H_USABLE = 6.85     # 라벨·헤더·푸터를 뺀 실제 본문 높이(inch)
+
+def _sec_lines(schema, key):
+    """섹션 → [(제목, 설명)] 목록. 분량 계산과 분할에 함께 쓴다."""
+    if key == "features":
+        return [(i["title"], i["desc"]) for i in _feature_list(schema)]
+    if key == "curriculum":
+        return [(i["name"], f"{i.get('desc') or ''} {i.get('detail') or ''}".strip())
+                for i in _curriculum_list(schema)]
+    if key == "management":
+        return [(_s(l), "") for l in _mgmt_list(schema)]
+    if key == "faq":
+        return [(i["q"], i["a"]) for i in _faq_list(schema)]
+    if key == "admission":
+        return [(_s(i.get("title") or i.get("k")), _s(i.get("desc") or i.get("v")))
+                for i in _admission_list(schema)]
+    if key == "achievements":
+        return [(_s(l), "") for l in _achievement_lines(schema)[1]]
+    if key == "specials":
+        return [(_s(i.get("title") or i.get("name")),
+                 _s(i.get("desc") or i.get("description") or i.get("text")))
+                for i in _items(schema.get("specials"))]
+    if key == "rules":
+        src = _items(schema.get("rules")) or _items(schema.get("policy"))
+        return [(_s(i.get("k") or i.get("title")), _s(i.get("v") or i.get("desc"))) for i in src]
+    return []
+
+def _sec_height(rows):
+    """[(제목, 설명)] → 예상 높이(inch)."""
+    h = 0.0
+    for t, d in rows:
+        h += _need_h(t, CW - 0.10, BODY, pad=0.02)
+        if d:
+            h += _need_h(d, CW - 0.60, MIN_BODY, pad=0.02) + 0.04
+        h += 0.14
+    return h
+
+def _plan_panels(schema, cand, slots):
+    """cand(섹션 후보) → slots 개 면에 배치한 계획.
+    ★면은 5칸인데 섹션이 8개면 6번째부터 <통째로 버려졌다>(특강이 사라진 원인).
+      앞 (slots-1) 칸은 전용 면으로, 남는 섹션은 전부 마지막 면에 모아 싣는다.
+    반환: [(kind, payload)]  kind='sec' → (key, draw_fn) / kind='combo' → parts
+    """
+    if len(cand) <= slots:
+        if isinstance(schema, dict):
+            schema["_ownPanel"] = {k for k, _f in cand}
+            schema["_auxAssign"] = {}
+        return [("sec", c) for c in cand]
+    own = cand[:slots - 1]
+    rest = [k for k, _fn in cand[slots - 1:]]
+    own_keys = {k for k, _f in own}
+    # ★남는 섹션을 전부 '한눈에 보기' 한 면에 몰면 그 면만 빽빽해지고
+    #   다른 면 하단은 빈다. 짧은 섹션은 여유 있는 면 아래에 붙인다.
+    #     학원 규정 → 상담·예약 면 / 자주 묻는 질문 → 강점 면
+    #   시크릿 리플렛처럼 주요 섹션은 전용 면을 갖고,
+    #   짧은 정보(규정·FAQ)는 여유 있는 면 <하단 카드>로 접어 넣는다.
+    aux = {}
+    for host, guest in (("admission", "rules"), ("features", "specials"),
+                        ("curriculum", "rules"), ("features", "rules")):
+        if host in aux or guest not in rest or host not in own_keys:
+            continue
+        aux[host] = guest
+        rest.remove(guest)
+    plan = [("sec", c) for c in own]
+    parts = [(t, ls) for t, ls in _combo_parts(schema, rest) if ls]
+    if parts:
+        plan.append(("combo", parts))
+    if isinstance(schema, dict):
+        schema["_ownPanel"] = own_keys
+        schema["_auxAssign"] = aux
+    return plan
 
 
 def _pick_sections(schema, slots, name):
@@ -1255,34 +1742,116 @@ def _pick_sections(schema, slots, name):
 
 def _panel_combo(slide, schema, x, c, parts):
     """여러 섹션을 한 면에 모아 그린다.
-    섹션이 3~4개일 때 안쪽면(3면)을 못 채워 콘텐츠를 버리는 것을 막는다.
-    각 파트를 [소제목 + 줄목록]으로 압축해 세로로 쌓고, 남는 높이에 맞춘다."""
-    _label(slide, x, "한눈에 보기", c)
-    hb = _header(slide, x, "학원 안내", c)
-    Y0, Y_END = max(1.54, hb + 0.14), 7.80
+    ★예전에는 전부 '· 한 줄' 불릿으로 흘려 성의 없어 보였다.
+      섹션마다 [라벨 + 연한 카드]를 주고, 카드 안에서 제목(굵게)과
+      설명(본문)을 구분해 다른 면과 위계를 맞춘다."""
+    hb = _bar_head(slide, x, "학원 안내", c)
+    Y0, Y_END = max(0.95, hb + 0.24), 7.62
+
+    # (제목, 설명) 으로 분해 — _combo_parts 는 '제목 — 설명' 으로 넘긴다
     blocks = []
     for title, lines in parts:
-        lines = [l for l in lines if _s(l)]
-        if not lines:
-            continue
-        blocks.append((title, lines))
+        rows = []
+        for l in lines:
+            t = _s(l)
+            if not t:
+                continue
+            m = re.split(r"\s+[—–]\s+", t, maxsplit=1)
+            if len(m) == 2:
+                rows.append((m[0].strip(), m[1].strip()))
+            else:
+                rows.append((t, ""))
+        if rows:
+            blocks.append((title, rows))
     if not blocks:
         return
-    # 필요한 높이를 먼저 재고, 넘치면 비례 축소
-    def _need(b):
-        return 0.30 + sum(max(1, int(_dwidth(l) / 24) + 1) * 0.21 for l in b[1])
-    total = sum(_need(b) for b in blocks) + 0.22 * (len(blocks) - 1)
-    scale = min(1.0, (Y_END - Y0) / total) if total > 0 else 1.0
+
+    LAB_H, PAD_T, PAD_B, GAP_ROW, GAP_SEC = 0.28, 0.18, 0.14, 0.12, 0.26
+    IW = CW - 0.44
+    AVAIL = Y_END - Y0
+
+    def _plan(bl, size, nodesc=()):
+        """블록 목록 → (측정치, 전체높이). nodesc 에 든 인덱스는 설명을 접는다."""
+        out, total = [], 0.0
+        for bi, (ti, rows) in enumerate(bl):
+            hs = []
+            for t, d in rows:
+                _qa = (bl[bi][0] == "자주 묻는 질문")
+                th = _need_h(("Q. " + t) if _qa else t, IW, size, pad=0.02) if t else 0.0
+                dh = (_need_h(d, IW - (0.20 if _qa else 0.0), size, pad=0.02)
+                      if (d and bi not in nodesc) else 0.0)
+                hs.append((max(0.21, th), dh))
+            _qgap = 0.06 if (bl[bi][0] == "자주 묻는 질문") else 0.0
+            card = PAD_T + sum(a + (b + 0.02 if b else 0.0) for a, b in hs) \
+                   + (GAP_ROW + _qgap) * max(0, len(rows) - 1) + PAD_B
+            out.append((ti, rows, hs, card))
+            total += LAB_H + card + GAP_SEC
+        return out, (total - GAP_SEC if bl else 0.0)
+
+    # ① 글자 크기를 줄여 맞춘다
+    size, nodesc = BODY, set()
+    while True:
+        meas, total = _plan(blocks, size, nodesc)
+        if total <= AVAIL or size <= MIN_BODY:
+            break
+        size -= 0.5
+    # ② 그래도 넘치면 <가장 긴 블록부터 하나씩> 설명을 접는다.
+    #    ★전부 한꺼번에 접으니 제목만 남고 하단 2.4in 가 비었다.
+    #   ★가장 긴 블록부터 접으니 <FAQ 답변>이 먼저 날아갔다.
+    #     답변·설명이 정보의 핵심인 블록은 마지막에 접는다.
+    _FOLD_LAST = ("자주 묻는 질문",)   # ★답변이 핵심이라 마지막까지 남긴다
+    def _fold_pick():
+        rest_i = [i for i in range(len(blocks)) if i not in nodesc]
+        keepers = [i for i in rest_i if blocks[i][0] in _FOLD_LAST]
+        pool = [i for i in rest_i if i not in keepers] or keepers
+        return max(pool, key=lambda i: meas[i][3])
+    while total > AVAIL and len(nodesc) < len(blocks):
+        nodesc.add(_fold_pick())
+        size = BODY
+        while True:
+            meas, total = _plan(blocks, size, nodesc)
+            if total <= AVAIL or size <= MIN_BODY:
+                break
+            size -= 0.5
+    # ③ 최후 — 여전히 넘치면 뒤 항목부터 덜어낸다(잘린 카드를 만들지 않는다)
+    if total > AVAIL:
+        trim = [(t, list(r)) for t, r in blocks]
+        while total > AVAIL and sum(len(r) for _t, r in trim) > len(trim):
+            longest = max(range(len(trim)), key=lambda i: len(trim[i][1]))
+            if len(trim[longest][1]) <= 1:
+                break
+            trim[longest][1].pop()
+            meas, total = _plan(trim, size, nodesc)
+
     y = Y0
-    for title, lines in blocks:
-        _text(slide, title, x + LEFT, y, CW, 0.28,
-              size=10.5, color=c["label"], bold=True)
-        by = y + 0.30 * scale
-        body = "\n".join("· " + _s(l) for l in lines)
-        bh = max(0.30, (_need((title, lines)) - 0.30) * scale)
-        _text(slide, body, x + LEFT, by, CW, bh,
-              size=MIN_BODY, color=c["body"], line_spacing=1.20, min_size=MIN_BODY)
-        y = by + bh + 0.22 * scale
+    for ti, rows, hs, card_h in meas:
+        _text(slide, ti, x + LEFT, y, CW, 0.26,
+              size=10.5, color=c["label"], bold=True, fit=False)
+        cy = y + LAB_H
+        _rect(slide, x + LEFT, cy, CW, card_h, fill=c["soft"], radius=True)
+        ry = cy + PAD_T
+        # ★질문과 답이 같은 자리·같은 색이라 구분이 안 됐다.
+        #   질문은 진한 색, 답은 컬러 세로바 + 들여쓰기로 확실히 나눈다.
+        _is_qa = (ti == "자주 묻는 질문")
+        _ind = 0.20 if _is_qa else 0.0
+        for (t, d), (th, dh) in zip(rows, hs):
+            if t:
+                _text(slide, (("Q. " + t) if _is_qa else t),
+                      x + LEFT + 0.22, ry, IW, th,
+                      size=size, color=c["head"],
+                      min_size=MIN_BODY, line_spacing=1.20)
+                ry += th
+            # ★설명을 접은 경우(dh=0) 높이 0 상자를 만들지 않는다.
+            if d and dh:
+                if _is_qa:
+                    _rect(slide, x + LEFT + 0.24, ry + 0.04, 0.026, dh - 0.02,
+                          fill=c["badge"])
+                _text(slide, d, x + LEFT + 0.22 + _ind, ry + 0.02, IW - _ind, dh,
+                      size=size, color=c["body"], min_size=MIN_BODY,
+                      line_spacing=1.26)
+                ry += dh + 0.02
+            ry += GAP_ROW + (0.06 if _is_qa else 0.0)
+        y = cy + card_h + GAP_SEC
 
 
 def _combo_parts(schema, keys):
@@ -1293,8 +1862,14 @@ def _combo_parts(schema, keys):
             head, lines = _achievement_lines(schema)
             out.append(("주요 실적", lines))
         elif k == "specials":
-            out.append(("특별 프로그램",
-                        [_s(i.get("title") or i.get("name")) for i in _items(schema.get("specials"))]))
+            # ★제목만 싣던 것을 '제목 — 설명' 으로 바꿔 무슨 수업인지 보이게 한다.
+            _sl = []
+            for i in _items(schema.get("specials")):
+                _t = _s(i.get("title") or i.get("name"))
+                _d = _s(i.get("desc") or i.get("description") or i.get("text"))
+                if _t:
+                    _sl.append(f"{_t} — {_d}" if _d else _t)
+            out.append(("특강 및 기타 수업", _sl))
         elif k == "management":
             out.append(("학습 관리", _mgmt_list(schema)))
         elif k == "faq":
@@ -1383,7 +1958,17 @@ def build(schema: Dict[str, Any], palette: str = "sewon_teal",
     # 후보를 5개까지 뽑아보고, 3~4개면 상위 2개만 써서 1장으로 낸다.
     cand = _pick_sections(schema, 8, name)
     if len(cand) >= 5:
-        picked = cand[:5]          # 2장(바깥3 + 안쪽3) 꽉 채움
+        # ★예전에는 cand[:5] 로 잘라 6번째 이후 섹션을 통째로 버렸고,
+        #   면별 분량을 재지 않아 한 면은 빽빽, 한 면은 하단이 비었다.
+        #   이제 분량을 재서 넘치는 섹션은 다음 면으로 이어 싣는다.
+        _plan = _plan_panels(schema, cand, 5)
+        picked = []
+        for kind, payload in _plan:
+            if kind == "sec":
+                picked.append(payload)
+            else:
+                picked.append(("combo",
+                               lambda sl, x, c, _p=payload: _panel_combo(sl, schema, x, c, _p)))
     elif len(cand) >= 3:
         # 3~4개: 1장으로 낸다. 콘텐츠 면이 2개뿐이므로
         # 첫 섹션은 제 면으로, 나머지 전부를 한 면에 합쳐 버리지 않는다.

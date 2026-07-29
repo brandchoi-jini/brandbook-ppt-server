@@ -449,7 +449,25 @@ def gv(d, *keys, default=None):
 
 
 def as_dicts(items, name_key="title"):
-    """리스트 원소가 문자열이어도 dict로 정규화."""
+    """리스트 원소가 문자열이어도 dict로 정규화.
+    ★{items:[...]} / {groups:[{items:[...]}]} 형태로 오면 예전에는 빈 리스트가 되어
+      실적 섹션이 통째로 사라졌다. 여기서 펼쳐 준다."""
+    if isinstance(items, dict):
+        if items.get("groups"):
+            _flat = []
+            for g in (items.get("groups") or []):
+                for it in (g.get("items") or []):
+                    if isinstance(it, dict):
+                        t = str(it.get("title") or it.get("name") or "").strip()
+                        ch = str(it.get("change") or "").strip()
+                        nt = str(it.get("note") or "").strip()
+                        d = " ".join(x for x in [("→ " + ch) if ch else "", nt] if x)
+                        _flat.append({name_key: t, "desc": d or it.get("desc", "")})
+                    elif isinstance(it, str) and it.strip():
+                        _flat.append({name_key: it.strip()})
+            items = _flat
+        else:
+            items = items.get("items") or []
     out = []
     for it in (items or []):
         if isinstance(it, dict):

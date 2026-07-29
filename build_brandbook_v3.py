@@ -403,8 +403,26 @@ def label(slide, pal, text, x=PADX, y=PADY):
 
 def header(slide, text, x=PADX, y=None, size=27, w=11.9):
     if y is None: y = PADY + 0.30
+    t = str(text or "").strip()
+    # ★헤더는 <한 문장>만 쓴다.
+    #   두 문장이 들어오면 19pt 까지 줄여도 두 줄을 못 맞춰 화면에서 잘렸다
+    #   ("…따라와. 따뜻" 처럼 엉뚱한 말로 끝남).
+    if t:
+        _sents = [x_ for x_ in re.split(r"(?<=[.!?])\s+", t) if x_.strip()]
+        if len(_sents) > 1:
+            t = _sents[0].strip()
+        # 한 문장인데도 너무 길면 절 단위로 끊는다(연결어미로 끝나면 다음 절까지 본다)
+        if wrap_lines(t, w-0.14, 19) > 2:
+            _CONN = r"(면|서|고|며|야|데|지만|는데|으로|까지|부터|보다|인데|라서|어서)$"
+            for m in re.finditer(r"[,，—–·]", t):
+                if m.start() < 8:
+                    continue
+                cand = t[:m.start()].strip()
+                if not re.search(_CONN, cand) and wrap_lines(cand, w-0.14, 19) <= 2:
+                    t = cand
+                    break
+        t = t.rstrip(" ,·—–")
     # 두 줄을 넘어가면 아래 본문과 겹친다 → 크기를 낮춰 두 줄 안에 담는다
-    t = str(text or "")
     while size > 19 and wrap_lines(t, w-0.14, size) > 2:
         size -= 1
     # 제목 왼쪽을 라벨 글자 시작선(세로바 오른쪽, +0.14)에 맞춤
@@ -485,7 +503,11 @@ def slide_intro(prs, pal, d):
     """학원 소개 — 한마디 / 슬로건 / 소개문 / 강점 박스를 한 장에."""
     intro = d.get("intro") or {}
     body  = str(intro.get("body","")).strip()
-    feats = [f for f in (d.get("features") or []) if str(f.get("desc","")).strip()][:6]
+    _fsrc = d.get("features") or []
+    # ★features 가 {items:[...]} 로 오면 .get 에서 죽었다.
+    if isinstance(_fsrc, dict):
+        _fsrc = _fsrc.get("items") or []
+    feats = [f for f in _fsrc if isinstance(f, dict) and str(f.get("desc","")).strip()][:6]
     if not body and not feats: return None
     a = d.get("academy", {})
     s = new_slide(prs)
@@ -557,9 +579,28 @@ def slide_achievements(prs, pal, d):
       슬라이드 높이는 7.5in 이므로 인쇄하면 잘린다."""
     ach = d.get("achievements")
     if not ach: return None
-    groups = [g for g in (ach.get("groups") or []) if g.get("items")]
+    if not isinstance(ach, dict):
+        ach = {"items": ach if isinstance(ach, list) else [ach]}
+
+    def _norm(lst):
+        """★항목이 문자열이나 None 으로 오면 .get 에서 죽었다 → dict 로 맞춘다."""
+        out = []
+        for it in (lst or []):
+            if isinstance(it, dict):
+                out.append(it)
+            elif isinstance(it, str) and it.strip():
+                out.append({"title": it.strip(), "change": "", "note": ""})
+        return out
+
+    groups = []
+    for g in (ach.get("groups") or []):
+        if not isinstance(g, dict):
+            continue
+        its = _norm(g.get("items"))
+        if its:
+            groups.append({"name": g.get("name", ""), "items": its})
     if not groups:
-        items = ach.get("items") or []
+        items = _norm(ach.get("items"))
         if not items: return None
         groups = [{"name": "", "items": items}]
     MAXI, MAXG = 5, 3          # 카드당 항목 수 / 한 장당 카드 수
@@ -571,6 +612,10 @@ def slide_achievements(prs, pal, d):
                 pages.append(cur); cur = []
             cur.append({"name": g.get("name",""), "items": its[i:i+MAXI]})
     if cur: pages.append(cur)
+    # ★마지막 장에 카드가 1개만 남아 지면이 통째로 비었다(성장 사례 1건).
+    #   앞 장에 자리가 있으면 끌어올려 합친다.
+    if len(pages) >= 2 and len(pages[-1]) == 1 and len(pages[-2]) < MAXG + 1:
+        pages[-2].extend(pages.pop())
     last = None
     for pi, gs in enumerate(pages, 1):
         last = _achievements_page(prs, pal, d, gs, pi, len(pages))
@@ -579,6 +624,9 @@ def slide_achievements(prs, pal, d):
 
 def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
     ach = d.get("achievements") or {}
+    # ★achievements 가 리스트로 바로 오면 .get 에서 죽었다.
+    if not isinstance(ach, dict):
+        ach = {}
     s = new_slide(prs)
     label(s, pal, _part("주요 실적", pi, parts))
     header(s, ach.get("head","") if pi == 1 else "", size=26)
@@ -617,7 +665,7 @@ def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
         rect(s, x, y, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
         # 유형 이름 — 진한 바탕 배지 + 아이콘
         gname = str(g.get("name","")).strip() or "주요 실적"
-        _ICON = {"고입 실적":"🎓", "대입 실적":"🏛", "내신·성적 향상":"📈", "성장 사례":"🌱"}
+        _ICON = {"고입 실적":"", "대입 실적":"", "내신·성적 향상":"", "성장 사례":""}
         ico = _ICON.get(gname, "★")
         _lab = f"{ico}  {gname}"
         pw = min(gw-0.4, 0.6 + _disp_width(_lab)*0.20)
@@ -654,13 +702,16 @@ def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
                 note = " / ".join(ls[1:])
             iy2 = rowsy + sum(_rows[:ii])
             # 제목 줄 — 왼줄 맞춤. 길면 크기를 줄여 한 줄에 담는다.
-            _full = ("• " + title + ("  " if (title and change) else "") + change)
+            _full = ("• " + title + ("  →  " if (title and change) else "") + change)
             tsz2 = 12.5
             while tsz2 > 10.0 and _disp_width(_full)*tsz2*0.0139 > (gw-0.52):
                 tsz2 -= 0.5
             runs = [("•  ", tsz2, True, kc)]
-            if title:  runs.append((title + ("   " if change else ""), tsz2, True, INK_STRONG))
-            if change: runs.append((change, tsz2, True, kc))
+            # ★화살표가 없어 '중1 입학   고3 수능까지…' 처럼 두 문장이 붙어 읽혔다.
+            if title:  runs.append((title, tsz2, True, INK_STRONG))
+            if change:
+                if title: runs.append(("  →  ", tsz2, True, kc))
+                runs.append((change, tsz2, True, kc))
             paras(s, x+0.26, iy2, gw-0.52, 0.30, [runs],
                   align=PP_ALIGN.LEFT, line_spacing=1.15, wrap=True)
             if note:
@@ -893,7 +944,19 @@ def _table_hlines(tbl, hex_line):
 
 def slide_specials(prs, pal, d):
     sp = d.get("specials")
-    if not sp or not sp.get("items"): return None
+    if not sp: return None
+    if not isinstance(sp, dict):
+        sp = {"items": sp if isinstance(sp, list) else [sp]}
+    # ★항목이 문자열이나 None 으로 오면 .get 에서 죽었다 → dict 로 맞춘다.
+    _its = []
+    for it in (sp.get("items") or []):
+        if isinstance(it, dict):
+            if str(it.get("title") or it.get("name") or "").strip():
+                _its.append(it)
+        elif isinstance(it, str) and it.strip():
+            _its.append({"title": it.strip(), "desc": ""})
+    if not _its: return None
+    sp = dict(sp); sp["items"] = _its
     pages = _chunk(sp["items"], 6)
     last = None
     for pi, items in enumerate(pages, 1):
@@ -902,7 +965,7 @@ def slide_specials(prs, pal, d):
 
 def _specials_page(prs, pal, sp, items, pi, parts):
     s = new_slide(prs)
-    label(s, pal, _part("특별 프로그램", pi, parts))
+    label(s, pal, _part("특강 및 기타 수업", pi, parts))
     header(s, sp.get("head","") if pi == 1 else "", size=26)
     n = len(items)
     gx, gy = PADX, 2.25
@@ -1158,9 +1221,19 @@ def slide_admission(prs, pal, d):
 
 def slide_rules(prs, pal, d):
     ru = d.get("rules")
-    if not ru or not ru.get("items"): return None
+    if not ru: return None
+    if not isinstance(ru, dict):
+        ru = {"items": ru if isinstance(ru, list) else []}
+    # ★항목이 None/문자열로 오면 .get 에서 죽었다 → dict 로 정규화한다.
+    items = []
+    for _it in (ru.get("items") or []):
+        if isinstance(_it, dict):
+            if str(_it.get("k") or _it.get("title") or "").strip() or str(_it.get("v") or "").strip():
+                items.append(_it)
+        elif isinstance(_it, str) and _it.strip():
+            items.append({"k": _it.strip(), "v": ""})
+    if not items: return None
     s = new_slide(prs)
-    items = ru["items"]
     n = len(items)
     rx = 4.3; rw = 11.9+PADX-rx
     kw = 1.15
@@ -1220,8 +1293,20 @@ def slide_rules(prs, pal, d):
 
 def slide_faq(prs, pal, d):
     fq = d.get("faq")
-    if not fq or not fq.get("items"): return None
-    pages = _chunk(fq["items"], 6)
+    if not fq: return None
+    if not isinstance(fq, dict):
+        fq = {"items": fq if isinstance(fq, list) else []}
+    # ★항목이 None/문자열로 오면 렌더에서 죽었다 → dict 로 정규화한다.
+    _fi = []
+    for _it in (fq.get("items") or []):
+        if isinstance(_it, dict):
+            if str(_it.get("q") or "").strip() or str(_it.get("a") or "").strip():
+                _fi.append(_it)
+        elif isinstance(_it, str) and _it.strip():
+            _fi.append({"q": _it.strip(), "a": ""})
+    if not _fi: return None
+    fq = dict(fq); fq["items"] = _fi
+    pages = _chunk(_fi, 6)
     last = None
     for pi, items in enumerate(pages, 1):
         last = _faq_page(prs, pal, fq, items, pi, len(pages))
@@ -1348,7 +1433,7 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
 
     # ── 브랜드북 목차 ──
     # 표지 / ①학원 소개 / ②주요 실적 / ③수업 강점 / ④수업 대상·반 구성·커리큘럼 /
-    # ⑤수업 방식·수업 관리 / ⑥시간표 / ⑦특별 프로그램 / ⑧입학 절차 / ⑨학원 규정 /
+    # ⑤수업 방식·수업 관리 / ⑥시간표 / ⑦특강 및 기타 수업 / ⑧입학 절차 / ⑨학원 규정 /
     # ⑩자주 묻는 질문 / ⑪상담 안내
     slide_cover(prs, pal, data)
     slide_intro(prs, pal, data)          # ① 학원 소개 (슬로건·소개문·강점 한 장)
@@ -1368,7 +1453,7 @@ def build(data, palette="teal_blue", out="brandbook.pptx"):
             for pi, ch in enumerate(chunks, 1):
                 slide_timetable(prs, pal, data, group, ch, part=pi, parts=len(chunks))
 
-    slide_specials(prs, pal, data)       # ⑦ 특별 프로그램
+    slide_specials(prs, pal, data)       # ⑦ 특강 및 기타 수업
     slide_admission(prs, pal, data)      # ⑧ 입학 절차
     slide_rules(prs, pal, data)          # ⑨ 학원 규정 (출결·보강·환불)
     slide_faq(prs, pal, data)            # ⑩ 자주 묻는 질문
