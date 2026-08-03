@@ -474,6 +474,12 @@ def _strip_style(shape):
 def _rect(slide, x, y, w, h, fill=None, line=None, radius=False, line_w=0.75):
     shp = MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE
     sh = slide.shapes.add_shape(shp, Inches(x), Inches(y), Inches(w), Inches(h))
+    if radius:
+        # ★기본 adj(0.1667)는 캡슐처럼 과하게 둥글다 → 실제 반경 0.035in 로 맞춘다.
+        try:
+            sh.adjustments[0] = max(0.004, min(0.05, 0.035 / max(0.01, min(w, h))))
+        except Exception:
+            pass
     if fill is None:
         sh.fill.background()
     else:
@@ -573,8 +579,14 @@ def _bar_head(slide, x, title, c, sub=None, y=0.30):
     _text(slide, t, x + LEFT + 0.20, y + 0.09, CW - 0.40, 0.28,
           size=12, color=c["paper"], fit=False)
     if sb:
-        _text(slide, sb, x + LEFT + 0.20, y + 0.39, CW - 0.40, 0.24,
-              size=8.5, color="BFD3E6", fit=False)
+        # ★fit=False 라서 폭을 넘으면 뒷부분이 잘렸다("학년별 수업 내용과 해내는").
+        #   글자 크기를 낮춰 한 줄에 담고, 그래도 길면 부제를 생략한다.
+        _ss = 8.5
+        while _ss > 6.5 and _dwidth(sb) * _ss * 0.0148 > (CW - 0.44):
+            _ss -= 0.25
+        if _dwidth(sb) * _ss * 0.0148 <= (CW - 0.40):
+            _text(slide, sb, x + LEFT + 0.20, y + 0.39, CW - 0.40, 0.24,
+                  size=_ss, color="BFD3E6", fit=False)
     return y + h + 0.26
 
 
@@ -891,7 +903,7 @@ def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
             th = _need_h(t, IW, size, pad=0.02) if t else 0.0
             dh = _need_h(d, IW, size, pad=0.02) if (d and with_desc) else 0.0
             rh = max(0.22, th) + (dh + 0.02 if dh else 0.0) + GAP
-            if 0.32 + used + rh + PAD_B > (y_bot - y_top):
+            if 0.80 + used + rh + PAD_B > (y_bot - y_top):
                 break
             keep.append((t, d if with_desc else "", max(0.22, th), dh)); used += rh
         return keep, used
@@ -911,7 +923,7 @@ def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
         size = BODY
         while size > MIN_BODY:
             _rh = _need_h("가", IW / 2 - 0.10, size, pad=0.02) + 0.10
-            _need_all = PAD_T + _rh * ((len(rows) + 1) // 2) + PAD_B + 0.32
+            _need_all = PAD_T + _rh * ((len(rows) + 1) // 2) + PAD_B + 0.80
             if _need_all <= (y_bot - y_top):
                 break
             size -= 0.5
@@ -922,9 +934,10 @@ def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
     if not keep:
         return 0.0
     card_h = used - GAP + PAD_B
-    _text(slide, _AUX_TITLE.get(key, key), x + LEFT, y_top, CW, 0.26,
-          size=10.5, color=c["label"], bold=True, fit=False)
-    cy = y_top + 0.32
+    # ★예전에는 작은 라벨만 붙여, 위 섹션(우리 학원의 강점)에 딸린 항목처럼 보였다.
+    #   서로 종속 관계가 아니므로 같은 모양의 어두운 헤더 바를 준다.
+    _ttl = _AUX_TITLE.get(key, key)
+    cy = _bar_head(slide, x, _ttl, c, y=y_top) - 0.04
     _rect(slide, x + LEFT, cy, CW, card_h, fill=c["soft"], radius=True)
     ry = cy + PAD_T
     if two_col:

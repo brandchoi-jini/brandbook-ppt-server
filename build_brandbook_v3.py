@@ -10,7 +10,7 @@
 슬라이드 크기 13.3 x 7.5 in. 서체 Pretendard(미설치 환경은 대체폰트).
 """
 # ★배포 확인용 — Railway에 새 코드가 올라갔는지 /  응답에서 바로 볼 수 있게 한다
-BUILD_VERSION = "2026-07-29i"
+BUILD_VERSION = "2026-07-29j"
 
 import re
 from pptx import Presentation
@@ -203,7 +203,7 @@ def _qr_png(url):
         return None
 
 
-CORNER_R = 0.07     # 모서리 반경(인치) — 살짝만 둥글게. 기본 둥근사각형은 너무 둥글다.
+CORNER_R = 0.035    # 모서리 반경(인치) — 살짝만. 0.07은 여전히 둥글어 보였다.
 
 def card_bg(pal):
     """박스 바탕 — 팔레트별 연한 색(없으면 기본 회백색)"""
@@ -219,7 +219,7 @@ def rect(slide, x, y, w, h, hexc=None, radius=False, line_hex=None, line_w=None)
         # 실제 반경이 CORNER_R 인치가 되도록 짧은 변 기준으로 환산한다.
         try:
             adj = CORNER_R / max(0.01, min(w, h))
-            s.adjustments[0] = max(0.008, min(0.14, adj))
+            s.adjustments[0] = max(0.004, min(0.05, adj))
         except Exception:
             pass
     if hexc:
@@ -1082,6 +1082,11 @@ def _management_row(s, pal, cols, single, key_colors):
     for idx, col in enumerate(cols):
         x = col_x[idx]; kc = key_colors[idx]
         _cn = str(col.get("name") or "").strip()
+        # ★슬라이드 라벨이 이미 "과목별 학생 관리"다. 과목이 하나뿐인 학원에서
+        #   그 아래 또 "학습관리"라고 쓰면 같은 말이 두 번 나온다 → 소제목을 생략한다.
+        #   (수학·과학처럼 과목명이 들어간 소제목은 구분에 필요하므로 남긴다)
+        if re.fullmatch(r"학습\s*관리(\s*시스템)?", _cn or ""):
+            _cn = ""
         if _cn:
             txt(s, x, 2.15, colw, 0.5, [(_cn, 19, True, kc)])
         hline(s, x, 2.72, colw, LINE, 1)
@@ -1296,7 +1301,8 @@ def slide_rules(prs, pal, d):
     label(s, pal, "학원 규정", x=PADX, y=mid-1.02)
     # ★앱이 head를 빈 문자열로 보내면 <한마디를 넣지 않겠다>는 뜻이다.
     #   예전에는 or 를 써서 빈 값을 "없음"으로 보고 "학원 규정 안내"를 대신 찍었다.
-    _rhead = str(ru.get("head") or "").strip() if "head" in ru else "학원 규정 안내"
+    # ★"학원 규정"은 라벨만 쓴다. 한마디를 붙이면 규정처럼 읽혀 오해를 부른다.
+    _rhead = ""
     if _rhead:
         _rsz = fit_box(_rhead, 3.35, 1.7, 31, 19, line_spacing=1.16)
         txt(s, PADX, mid-0.70, 3.35, 1.9,
@@ -1340,7 +1346,8 @@ def _faq_page(prs, pal, fq, _items, pi, parts):
     fq = dict(fq); fq["items"] = _items
     s = new_slide(prs)
     label(s, pal, _part("자주 묻는 질문", pi, parts))
-    header(s, fq.get("head","궁금한 점을 미리 확인하세요") if pi == 1 else "", size=26)
+    # ★"자주 묻는 질문"도 라벨만 쓴다.
+    header(s, "", size=26)
     items = fq["items"][:6]
     gx, gy = PADX, 2.15
     gap = 0.3
