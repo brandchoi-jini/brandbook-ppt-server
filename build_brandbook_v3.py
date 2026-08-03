@@ -404,23 +404,29 @@ def label(slide, pal, text, x=PADX, y=PADY):
 def header(slide, text, x=PADX, y=None, size=27, w=11.9):
     if y is None: y = PADY + 0.30
     t = str(text or "").strip()
-    # ★헤더는 <한 문장>만 쓴다.
-    #   두 문장이 들어오면 19pt 까지 줄여도 두 줄을 못 맞춰 화면에서 잘렸다
-    #   ("…따라와. 따뜻" 처럼 엉뚱한 말로 끝남).
+    # ★헤더는 <한 문장>만 쓴다. 마침표로 끝난 <완결된 문장>이 둘 이상이면 첫 문장만 남긴다.
+    #   (문장 도중을 자르는 것이 아니므로 말이 끊기지 않는다)
     if t:
         _sents = [x_ for x_ in re.split(r"(?<=[.!?])\s+", t) if x_.strip()]
         if len(_sents) > 1:
             t = _sents[0].strip()
-        # 한 문장인데도 너무 길면 절 단위로 끊는다(연결어미로 끝나면 다음 절까지 본다)
+        # ★예전에는 길면 쉼표에서 끊었다. 그래서 "수업이 끝난 그날 밤, 배운 내용을
+        #   학부모님께 전달합니다" 가 "수업이 끝난 그날 밤" 으로 잘려 <말이 끊긴 채>
+        #   슬라이드에 실렸다. 한마디는 문장이므로 도중에 자르지 않는다.
+        #   길면 글자 크기만 낮춘다. (길이 조절은 앱이 <뜻을 살려 다시 쓰는> 방식으로 한다)
         if wrap_lines(t, w-0.14, 19) > 2:
-            _CONN = r"(면|서|고|며|야|데|지만|는데|으로|까지|부터|보다|인데|라서|어서)$"
-            for m in re.finditer(r"[,，—–·]", t):
-                if m.start() < 8:
-                    continue
-                cand = t[:m.start()].strip()
-                if not re.search(_CONN, cand) and wrap_lines(cand, w-0.14, 19) <= 2:
-                    t = cand
+            _ok = False
+            for _s in (18, 17, 16, 15, 14):
+                if wrap_lines(t, w-0.14, _s) <= 2:
+                    size = min(size, _s)
+                    _ok = True
                     break
+            if not _ok:
+                # ★여기서 문장을 자르지 않는다. 잘린 말은 어떤 경우에도 슬라이드에
+                #   올리지 않는다("수업이 끝난 그날 밤" 처럼 끊겨 나가던 문제).
+                #   길이 조절은 앱이 <뜻을 살려 짧게 다시 쓰는> 방식으로 처리한다.
+                #   여기서는 최소 크기까지만 낮추고 그대로 담는다.
+                size = min(size, 14)
         t = t.rstrip(" ,·—–")
     # 두 줄을 넘어가면 아래 본문과 겹친다 → 크기를 낮춰 두 줄 안에 담는다
     while size > 19 and wrap_lines(t, w-0.14, size) > 2:
@@ -631,13 +637,10 @@ def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
     label(s, pal, _part("주요 실적", pi, parts))
     header(s, ach.get("head","") if pi == 1 else "", size=26)
 
-    imgs = ((d.get("assets") or {}).get("achievements") or [])[:2]
+    # ★하단 사진 띠는 쓰지 않는다. 가로로 납작하게 잘려(1.55인치) 내용이 안 보이고
+    #   카드 영역만 좁아졌다. 실적은 카드로만 보여준다.
     top = 2.25 if (pi == 1 and str(ach.get("head","")).strip()) else 1.60
     bottom = 7.05
-    band = 0.0
-    if imgs:
-        band = 1.55
-        bottom = 7.05 - band - 0.24
 
     n = len(groups)
     cols = min(n, 3 if n <= 3 else 2)
@@ -720,14 +723,6 @@ def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
                 txt(s, x+0.52, iy2+0.30, gw-0.82, nl*(_NSZ*0.0139*1.42)+0.04,
                     [(note, _NSZ, False, "5A6A7A")], align=PP_ALIGN.LEFT, line_spacing=1.26)
 
-    # 실적 사진 — 별도 장이 아니라 이 페이지의 데코
-    if imgs:
-        by = 7.05 - band
-        iw = (11.9 - 0.24*(len(imgs)-1))/len(imgs)
-        for i, u in enumerate(imgs):
-            ix = PADX + i*(iw+0.24)
-            rect(s, ix, by, iw, band, PH_BG, radius=True)
-            place_image(s, u, ix, by, iw, band, cover=True)
     return s
 
 
@@ -807,31 +802,44 @@ def slide_targets(prs, pal, d):
             y += 0.26
         n = len(stages)
         gap = 0.26
-        gw = (11.9-(n-1)*gap)/max(n,1)
-        gh = 7.05 - y
+        # ★단계가 2개뿐인 학원(중등·고등만 운영)은 카드가 가로로 늘어나 밋밋했다.
+        #   카드 폭에 상한을 두고 가운데로 모아, 3단계 학원과 같은 밀도로 보이게 한다.
+        CARD_MAX = 4.15
+        gw = min(CARD_MAX, (11.9-(n-1)*gap)/max(n,1))
+        x0 = PADX + max(0.0, (11.9 - (gw*n + gap*(n-1)))/2)
+        # ★계단식 — 뒤 단계일수록 카드를 위로 올려 <올라가는 흐름>이 보이게 한다.
+        #   (평평하게 늘어놓으면 단계가 아니라 목록처럼 읽힌다)
+        RISE = 0.0 if n <= 1 else min(0.52, (7.05 - y - 2.60) / max(1, n-1))
         step_colors = _stage_colors(pal, n)
         for i, st_ in enumerate(stages):
-            x = PADX + i*(gw+gap)
+            x = x0 + i*(gw+gap)
             c = step_colors[i]
-            rect(s, x, y, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
-            if i > 0:      # 카드 사이 진행 화살표
-                txt(s, x-gap-0.06, y+gh/2-0.20, gap+0.12, 0.40,
-                    [("→", 15, True, c)], align=PP_ALIGN.CENTER, wrap=False)
+            cy = y + (n-1-i)*RISE          # 첫 단계가 가장 아래
+            gh = 7.05 - cy
+            rect(s, x, cy, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
+            if i > 0:      # 카드 사이 진행 화살표 — 올라가는 방향
+                txt(s, x-gap-0.10, cy+0.34, gap+0.20, 0.40,
+                    [("↗" if RISE > 0.05 else "→", 15, True, c)],
+                    align=PP_ALIGN.CENTER, wrap=False)
             nm = str(st_.get("name","")).strip()
             tag = str(st_.get("tag","")).strip()
-            iy = y + 0.24
+            iy = cy + 0.24
             if tag:
+                # ★배지는 카드 위에 띄워 단계 이름과 겹치지 않게 한다
                 pw = min(gw-0.4, 0.5 + _disp_width(tag)*0.19)
-                rect(s, x+0.22, iy, pw, 0.34, pal["pill_bg"], radius=True)
-                txt(s, x+0.30, iy, pw, 0.34, [(tag, 12.5, True, pal["pill_ink"])],
+                by = cy - 0.52
+                if by < PADY + 0.10:
+                    by = cy + 0.10
+                    iy = by + 0.46
+                rect(s, x+0.22, by, pw, 0.36, pal["pill_bg"], radius=True)
+                txt(s, x+0.30, by, pw, 0.36, [(tag, 12.5, True, pal["pill_ink"])],
                     align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
-                iy += 0.42
             if nm:
                 txt(s, x+0.22, iy, gw-0.44, 0.44, [(nm, 17, True, INK_STRONG)], line_spacing=1.15)
                 iy += 0.46
             items = [str(v).strip() for v in (st_.get("items") or []) if str(v).strip()]
             if items:
-                ih = y + gh - iy - 0.18
+                ih = cy + gh - iy - 0.18
                 isz = 13.5
                 while isz > 9.5 and sum(max(1, wrap_lines(v, gw-0.62, isz)) for v in items)*(isz*0.0139*1.62)*1.30 > ih:
                     isz -= 0.5
@@ -1050,6 +1058,14 @@ def _management_page(prs, pal, mg, cols, pi, parts):
 def _management_row(s, pal, cols, single, key_colors):
     # 줄 타입: 좌 키박스 + 우 설명. 과목 1개면 전체폭 대신 왼쪽 정리(오른쪽 여백 축소)
     total = 11.9; gap = 0.7
+    # ★과목이 하나면 전체폭 한 줄로 늘어나 오른쪽이 허전하고 줄 간격만 벌어졌다.
+    #   항목이 4개 이상이면 두 칸으로 나눠, 2과목 학원과 같은 밀도로 보이게 한다.
+    if single and len(cols) == 1 and len(cols[0].get("rows") or []) >= 4:
+        _rows = list(cols[0]["rows"])
+        _half = (len(_rows) + 1)//2
+        cols = [{"name": cols[0].get("name",""), "rows": _rows[:_half]},
+                {"name": "", "rows": _rows[_half:]}]
+        single = False
     if single:
         colw = total        # 과목 1개면 전체폭을 써서 설명이 넉넉하게
         col_x = [PADX]
@@ -1062,7 +1078,9 @@ def _management_row(s, pal, cols, single, key_colors):
     pitch = min(1.15, (rows_bottom - rows_top)/max(max_rows,1))
     for idx, col in enumerate(cols):
         x = col_x[idx]; kc = key_colors[idx]
-        txt(s, x, 2.15, colw, 0.5, [(col["name"], 19, True, kc)])
+        _cn = str(col.get("name") or "").strip()
+        if _cn:
+            txt(s, x, 2.15, colw, 0.5, [(_cn, 19, True, kc)])
         hline(s, x, 2.72, colw, LINE, 1)
         kw = 1.15
         for j, row in enumerate(col["rows"]):

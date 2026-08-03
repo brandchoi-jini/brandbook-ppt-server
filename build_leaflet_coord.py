@@ -557,7 +557,7 @@ _SEC_SUB = {
     "교육 과정":       "학년별로 무엇을 어떻게 하는지",
     "학습 관리":       "배우고, 확인하고, 끝까지 봅니다",
     "주요 실적":       "재원생이 만든 결과",
-    "특강 및 기타 수업": "정규 수업 밖에서 더 하는 것",
+    "특강 및 기타 수업": "정규 수업 외에 따로 운영하는 프로그램",
     "학원 규정":       "미리 알고 오시면 좋은 기준",
     "학원 안내":       "한눈에 보는 운영 방식",
 }
@@ -1453,6 +1453,54 @@ def _panel_management(slide, schema, x, c):
 
 
 # ── 예비 패널(대체 섹션) ──────────────────────────────
+def _fill_leftover(slide, schema, x, c, y0, y_end):
+    """면 아래에 남는 자리를 <그 학원에 있는 것>으로 채운다.
+       학원마다 자료가 달라 한 가지로 정할 수 없다 →
+       ①아직 못 실은 실적이 있으면 실적을 더 싣고
+       ②없으면 약도, ③약도도 없으면 학원 사진을 넣는다.
+       ④셋 다 없으면 그냥 비워 둔다(억지로 채우지 않는다)."""
+    avail = y_end - y0
+    if avail < 1.10:
+        return y0
+    _as = schema.get("assets") or {}
+
+    # ① 남은 실적 줄
+    rest = schema.get("_achRest") or []
+    if rest:
+        _text(slide, "그 밖의 성장 사례", x + LEFT, y0, CW, 0.24,
+              size=9.5, color=c["label"], fit=False)
+        yy = y0 + 0.28
+        card_h = min(avail - 0.34, 0.24 + len(rest) * 0.30)
+        _rect(slide, x + LEFT, yy, CW, card_h, fill=c["soft"], radius=True)
+        iy = yy + 0.12
+        for line in rest:
+            if iy + 0.28 > yy + card_h:
+                break
+            _text(slide, _s(line), x + LEFT + 0.14, iy, CW - 0.28, 0.26,
+                  size=9.5, color=c["title"], min_size=8.0)
+            iy += 0.30
+        schema["_achRest"] = []
+        return yy + card_h + 0.16
+
+    # ② 약도 → ③ 학원 사진
+    img = _s(_as.get("map")) or ""
+    cap = "오시는 길"
+    if not img:
+        _ph = _as.get("photos")
+        if isinstance(_ph, list) and _ph:
+            img, cap = _s(_ph[0]), "학원 전경"
+        else:
+            img = _s(_as.get("cover")) or _s(_as.get("banner"))
+            cap = "학원 전경"
+    if not img:
+        return y0
+    _text(slide, cap, x + LEFT, y0, CW, 0.24,
+          size=9.5, color=c["label"], fit=False)
+    ih = min(avail - 0.34, CW * 0.72)
+    _photo_or_box(slide, img, x + LEFT, y0 + 0.28, CW, ih, c, cap, cover_mode=True)
+    return y0 + 0.28 + ih + 0.16
+
+
 def _panel_achievements(slide, schema, x, c):
     """주요 실적 — ★3단 접지에서 <뒷면>이 되는 면.
     손에 들었을 때 바로 보이므로 실적은 <한 줄씩 제목만> 싣고,
@@ -1526,9 +1574,11 @@ def _panel_achievements(slide, schema, x, c):
         _sz -= 0.5
         meas, tot = _measure(_sz)
 
+    _left = []
     for gname, hs, card_h in meas:
         if y + (GH if gname else 0.0) + card_h > LIMIT + 0.12:
-            break
+            _left.extend(l for l, _h in hs)      # 못 실은 실적은 뒤에서 쓴다
+            continue
         if gname:
             _text(slide, gname, x + LEFT, y, CW, 0.26,
                   size=9.5, color=c["label"], fit=False)
@@ -1540,6 +1590,11 @@ def _panel_achievements(slide, schema, x, c):
                   size=_sz, color=c["title"], min_size=8.0, line_spacing=1.22)
             iy += hh + GAPI
         y += card_h + GAPG
+
+    # ★남는 자리 — 학원 상황에 맞게 채운다(실적 우선, 없으면 약도·사진)
+    schema["_achRest"] = _left
+    if LIMIT - y >= 1.10:
+        y = _fill_leftover(slide, schema, x, c, y, LIMIT)
 
     # ── 연락처 ─────────────────────────────────────────
     _rect(slide, x + LEFT, cy, CW, 0.012, fill=c["card_line"])
@@ -1766,7 +1821,9 @@ def _panel_combo(slide, schema, x, c, parts):
     if not blocks:
         return
 
-    LAB_H, PAD_T, PAD_B, GAP_ROW, GAP_SEC = 0.28, 0.18, 0.14, 0.12, 0.26
+    # ★블록 제목 아래에 부제 한 줄을 넣는다. 다른 면은 헤더 바에 부제가 붙는데
+    #   이 면만 제목뿐이라 위계가 어긋나 보였다.
+    LAB_H, PAD_T, PAD_B, GAP_ROW, GAP_SEC = 0.46, 0.18, 0.14, 0.12, 0.26
     IW = CW - 0.44
     AVAIL = Y_END - Y0
 
@@ -1799,7 +1856,11 @@ def _panel_combo(slide, schema, x, c, parts):
     #    ★전부 한꺼번에 접으니 제목만 남고 하단 2.4in 가 비었다.
     #   ★가장 긴 블록부터 접으니 <FAQ 답변>이 먼저 날아갔다.
     #     답변·설명이 정보의 핵심인 블록은 마지막에 접는다.
-    _FOLD_LAST = ("자주 묻는 질문",)   # ★답변이 핵심이라 마지막까지 남긴다
+    # ★설명이 곧 내용인 블록은 마지막까지 접지 않는다.
+    #   예전에는 FAQ만 보호해서, FAQ와 같은 면에 놓인 <학습 관리>가 먼저 접혔다.
+    #   그 결과 "과제 / 오답 관리 / 성취도 점검 / 학부모 소통" 라벨만 남아
+    #   무엇을 어떻게 관리하는지 알 수 없는 면이 되었다.
+    _FOLD_LAST = ("자주 묻는 질문", "학습 관리", "특강 및 기타 수업")
     def _fold_pick():
         rest_i = [i for i in range(len(blocks)) if i not in nodesc]
         keepers = [i for i in rest_i if blocks[i][0] in _FOLD_LAST]
@@ -1827,6 +1888,10 @@ def _panel_combo(slide, schema, x, c, parts):
     for ti, rows, hs, card_h in meas:
         _text(slide, ti, x + LEFT, y, CW, 0.26,
               size=10.5, color=c["label"], bold=True, fit=False)
+        _sub_t = _SEC_SUB.get(ti, "")
+        if _sub_t:
+            _text(slide, _sub_t, x + LEFT, y + 0.24, CW, 0.20,
+                  size=8.5, color=c["body"], fit=False)
         cy = y + LAB_H
         _rect(slide, x + LEFT, cy, CW, card_h, fill=c["soft"], radius=True)
         ry = cy + PAD_T
@@ -1869,7 +1934,7 @@ def _combo_parts(schema, keys):
                 _d = _s(i.get("desc") or i.get("description") or i.get("text"))
                 if _t:
                     _sl.append(f"{_t} — {_d}" if _d else _t)
-            out.append(("특강 및 기타 수업", _sl))
+            out.append(("특강 및 기타 수업", _sl))   # 부제는 _COMBO_SUB 참조
         elif k == "management":
             out.append(("학습 관리", _mgmt_list(schema)))
         elif k == "faq":
