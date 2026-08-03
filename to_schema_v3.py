@@ -4,6 +4,11 @@
 build_brandbook_v3.py 가 먹는 스키마(sewon.json 형태)를 만든다.
 빈 섹션은 빈 값으로 두면 빌더가 알아서 슬라이드 생략.
 """
+# ★[헤더 정책] 슬라이드 <한마디>(head)는 "학원 소개"에만 둔다.
+#   예전에는 이 변환기가 "주요 실적"·"학년에 꼭 맞는 과정"·"특별 프로그램"·
+#   "입학 절차"·"학원 관리 지침" 같은 고정 문구를 넣어서,
+#   앱이 head를 비워 보내도 슬라이드에 한마디가 찍혔다.
+#   라벨과 같은 말이라 정보가 없고 어색해서 전부 빈 값으로 바꿨다.
 import re
 from content_quality import normalize_raw
 
@@ -184,7 +189,7 @@ def convert(raw, brand=None):
     if _ach_src:
         _groups = _build_ach_groups(_ach_src)
         if _groups:
-            achievements = {"head": (achievements.get("head") if achievements else "") or "주요 실적",
+            achievements = {"head": (achievements.get("head") if achievements else "") or "",
                             "groups": _groups}
 
     # 수업 대상(targets): classProfiles/divisions에서 학년별로
@@ -209,7 +214,7 @@ def convert(raw, brand=None):
             if by_grade.get(key):
                 items.append({"grade":lab, "subj":" · ".join(dict.fromkeys(by_grade[key]))[:60], "desc":""})
         if items:
-            targets = {"head":"학년에 꼭 맞는 과정","items":items}
+            targets = {"head":"","items":items}
 
     # 커리큘럼(단계): content.curriculum 또는 brand
     curriculum = brand.get("curriculum") or {}
@@ -268,7 +273,7 @@ def convert(raw, brand=None):
             elif isinstance(it, str) and it.strip():
                 items.append({"no": f"{i+1:02d}", "title": it.strip(), "desc": ""})
         if items:
-            specials={"head":"특별 프로그램","items":items}
+            specials={"head":"","items":items}
 
     # 과목별 관리
     management = brand.get("management") or {}
@@ -314,7 +319,7 @@ def convert(raw, brand=None):
             elif isinstance(it, str) and it.strip():
                 items.append({"no": i+1, "step": it.strip(), "desc": ""})
         if items:
-            admission = {"head": "입학 절차", "items": items}
+            admission = {"head": "", "items": items}
 
     # 규정
     rules = brand.get("rules") or {}
@@ -324,7 +329,7 @@ def convert(raw, brand=None):
             # 과제·테스트·피드백은 학습관리이며 운영규정에 넣지 않는다.
             keymap=[("attendance","출결"),("absence","결석"),("withdrawal","퇴원"),("refund","환불")]
             items=[{"k":lab,"v":op[k]} for k,lab in keymap if op.get(k)]
-            if items: rules={"head":"학원 관리 지침","items":items}
+            if items: rules={"head":"","items":items}
 
     def _faq_short(v, limit=90):
         """★FAQ 답변이 300~580자로 들어와 PPT·리플렛에서 안 읽혔다.

@@ -1273,11 +1273,14 @@ def slide_rules(prs, pal, d):
 
     # 좌 제목 — 블록 세로 중앙에 맞춤
     label(s, pal, "학원 규정", x=PADX, y=mid-1.02)
-    _rhead = ru.get("head") or "학원 규정 안내"
-    _rsz = fit_box(_rhead, 3.35, 1.7, 31, 19, line_spacing=1.16)
-    txt(s, PADX, mid-0.70, 3.35, 1.9,
-        [(_rhead, _rsz, True, INK_STRONG)],
-        line_spacing=1.16, anchor=MSO_ANCHOR.TOP)
+    # ★앱이 head를 빈 문자열로 보내면 <한마디를 넣지 않겠다>는 뜻이다.
+    #   예전에는 or 를 써서 빈 값을 "없음"으로 보고 "학원 규정 안내"를 대신 찍었다.
+    _rhead = str(ru.get("head") or "").strip() if "head" in ru else "학원 규정 안내"
+    if _rhead:
+        _rsz = fit_box(_rhead, 3.35, 1.7, 31, 19, line_spacing=1.16)
+        txt(s, PADX, mid-0.70, 3.35, 1.9,
+            [(_rhead, _rsz, True, INK_STRONG)],
+            line_spacing=1.16, anchor=MSO_ANCHOR.TOP)
 
     yy = top
     for i, it in enumerate(items):
