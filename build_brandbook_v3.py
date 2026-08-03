@@ -10,7 +10,7 @@
 슬라이드 크기 13.3 x 7.5 in. 서체 Pretendard(미설치 환경은 대체폰트).
 """
 # ★배포 확인용 — Railway에 새 코드가 올라갔는지 /  응답에서 바로 볼 수 있게 한다
-BUILD_VERSION = "2026-07-29j"
+BUILD_VERSION = "2026-07-29k"
 
 import re
 from pptx import Presentation
@@ -563,6 +563,10 @@ def slide_intro(prs, pal, d):
         gap, gapy = 0.26, 0.22
         gw = (11.9-(ncol-1)*gap)/ncol
         gh = min(2.2, (7.05-grid_top-gapy*(nrow-1))/max(nrow,1))
+        # ★배지 폭이 글자 수마다 달라 6칸이 들쭉날쭉했다.
+        #   가장 긴 제목 기준으로 폭을 맞춰 통일감을 준다.
+        _PW = min(gw-0.3, max(0.5 + _disp_width(str(f.get("title","")))*0.20
+                              for f in feats))
         for i, f in enumerate(feats):
             r = i//ncol; c = i%ncol
             in_row = min(ncol, n - r*ncol)
@@ -570,7 +574,7 @@ def slide_intro(prs, pal, d):
             x = PADX + off + c*(gw+gap); yy = grid_top + r*(gh+gapy)
             rect(s, x, yy, gw, gh, card_bg(pal), radius=True, line_hex=CARD_LINE, line_w=1)
             title = str(f.get("title",""))
-            pw = min(gw-0.3, 0.5 + _disp_width(title)*0.20)
+            pw = _PW
             rect(s, x+(gw-pw)/2, yy+0.18, pw, 0.40, pal["pill_bg"], radius=True)
             txt(s, x+(gw-pw)/2, yy+0.19, pw, 0.38, [(title, 12.5, True, pal["pill_ink"])],
                 align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, wrap=False)
@@ -759,9 +763,10 @@ def slide_targets(prs, pal, d):
     head = str(tg.get("head","") or cu.get("head","")).strip()
     if head:
         header(s, head, size=26)
-        top = 2.20
+        # ★대상 블록이 아래로 처져 커리큘럼 배지와 붙어 보였다 → 위로 올린다.
+        top = 1.92
     else:
-        top = 1.55
+        top = 1.42
 
     colors = _stage_colors(pal, max(len(rows_src), len(stages), 1))
     photos = tg.get("_photos") or []
@@ -770,7 +775,9 @@ def slide_targets(prs, pal, d):
     y = top
     if rows_src:
         n = len(rows_src)
-        area = (4.20 if stages else 7.05) - top
+        # ★커리큘럼 카드 위에 배지가 떠 있어(카드 상단 -0.52in) 대상 블록과 겹쳤다.
+        #   단계가 있으면 대상 영역을 그만큼 위에서 끊는다.
+        area = (3.72 if stages else 7.05) - top
         rh = min(0.92, area/max(n,1))
         pw_col, gap = 1.15, 0.28
         has_ph = bool(photos)
@@ -802,7 +809,7 @@ def slide_targets(prs, pal, d):
     if stages:
         if rows_src:
             hline(s, PADX, y, 11.9, LINE, 1)
-            y += 0.26
+            y += 0.72          # ★배지가 카드 위로 떠 있으므로 구분선과 넉넉히 띄운다
         n = len(stages)
         gap = 0.26
         # ★단계가 2개뿐인 학원(중등·고등만 운영)은 카드가 가로로 늘어나 밋밋했다.
@@ -1077,8 +1084,13 @@ def _management_row(s, pal, cols, single, key_colors):
         col_x = [PADX, PADX+colw+gap]
         vline(s, PADX+colw+gap/2, 2.15, 4.4, LINE, 1)
     max_rows = max(len(c["rows"]) for c in cols)
+    # ★항목이 위에 몰리고 아래가 텅 비었다(2줄짜리 학원). 실제 줄 수로 간격을 잡고,
+    #   남는 공간은 위아래로 나눠 슬라이드 상하 균형을 맞춘다.
     rows_top = 2.98; rows_bottom = 7.0
-    pitch = min(1.15, (rows_bottom - rows_top)/max(max_rows,1))
+    _avail = rows_bottom - rows_top
+    pitch = min(1.15, _avail/max(max_rows,1))
+    _used = pitch * max_rows
+    rows_top += max(0.0, (_avail - _used) / 2.0)
     for idx, col in enumerate(cols):
         x = col_x[idx]; kc = key_colors[idx]
         _cn = str(col.get("name") or "").strip()
