@@ -31,6 +31,7 @@ def _is_schema(d):
 @app.get("/")
 def health():
     return {"ok": True, "service": "brandbook-ppt-server-v3",
+            "build": getattr(B, "BUILD_VERSION", "unknown"),
             "palettes": sorted(VALID_PAL), "skins": ["v3", "book", "navy"],
             "navy": navy_options(),
             "leaflet_palettes": ["sewon_teal", "sewon_yellow", "navy_amber"]}

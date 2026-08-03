@@ -9,6 +9,9 @@
   * 본문 넘침 시 폰트 auto-fit(길이 기반 pt 단계 축소)
 슬라이드 크기 13.3 x 7.5 in. 서체 Pretendard(미설치 환경은 대체폰트).
 """
+# ★배포 확인용 — Railway에 새 코드가 올라갔는지 /  응답에서 바로 볼 수 있게 한다
+BUILD_VERSION = "2026-07-29i"
+
 import re
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
