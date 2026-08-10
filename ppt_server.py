@@ -230,7 +230,10 @@ async def build_leaflet(req: Request):
            or payload.get("design") or "sewon_teal").lower()
     alias = {"teal": "sewon_teal", "yellow": "sewon_yellow", "blue": "sewon_teal",
              "green": "sewon_teal", "orange": "sewon_yellow", "navy": "navy_amber"}
-    if pal not in LEAFLET.PALETTES:
+    # ★card_navy 는 기존 빌더의 PALETTES 에 없으므로 여기서 sewon_teal 로
+    #   덮어써졌고, 아래 분기가 절대 타지 않았다. 새 스킨 이름은 그대로 지킨다.
+    CARD_PALS = {"card_navy"}
+    if pal not in CARD_PALS and pal not in LEAFLET.PALETTES:
         pal = alias.get(pal, "sewon_teal")
 
     # 스키마 변환/보강 (브랜드북 /build 와 동일 로직)
