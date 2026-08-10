@@ -825,6 +825,8 @@ def _achievement_lines(schema):
                 t = _s(it.get("title") or it.get("name"))
                 ch = _s(it.get("change"))
                 nt = _s(it.get("note"))
+                # ★change 값 자체가 '→' 로 시작하는 경우가 있어 '→ →' 로 겹쳤다.
+                ch = re.sub(r"^\s*(?:→|->|⇒)\s*", "", ch)
                 _desc = " ".join(x for x in [("→ " + ch) if ch else "", nt] if x)
                 _src.append({"name": t, "desc": _desc})
     for it in _src[:8]:
@@ -885,6 +887,43 @@ def _aux_rows(schema, key):
     if key == "schedule":
         return [(_s(i.get("k")), _s(i.get("v"))) for i in _items(schema.get("schedule")) if _s(i.get("v"))]
     return []
+
+
+def _aux_taken(schema):
+    """이미 배정·사용된 보조 카드 키 집합.
+    ★앞면(상담·예약)과 뒷면(강점)이 서로 무엇을 썼는지 몰라
+      '특강 및 기타 수업' 이 양면에 똑같이 두 번 그려졌다."""
+    if not isinstance(schema, dict):
+        return set()
+    taken = set(schema.get("_auxUsed") or set())
+    taken |= set((schema.get("_auxAssign") or {}).values())
+    return taken
+
+
+def _aux_choose(schema, host, cands):
+    """이 면(host)이 하단에 넣을 보조 카드 키를 하나 고른다.
+    계획(_auxAssign)에 배정된 것이 있으면 그것을, 없으면 아직 아무도
+    쓰지 않은 후보 중에서 고른다. 고른 키는 사용 처리한다."""
+    if not isinstance(schema, dict):
+        return None
+    used = set(schema.get("_auxUsed") or set())
+    planned = (schema.get("_auxAssign") or {}).get(host)
+    pick = None
+    if planned and planned not in used and _aux_rows(schema, planned):
+        pick = planned
+    else:
+        own = schema.get("_ownPanel") or set()
+        blocked = _aux_taken(schema)
+        for k in cands:
+            if k in own or k in blocked:
+                continue
+            if _aux_rows(schema, k):
+                pick = k
+                break
+    if pick:
+        used.add(pick)
+        schema["_auxUsed"] = used
+    return pick
 
 
 def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
@@ -974,12 +1013,11 @@ def _panel_admission(slide, schema, x, c):
     sub_y = hb - 0.16
 
     steps = _admission_list(schema)
-    if not steps:  # 최소 보장(학원 무관 일반 상담 절차 — 세원 특정 아님)
-        steps = [
-            {"title": "전화 상담", "desc": "가능 시간과 과정을 먼저 확인합니다."},
-            {"title": "학생 상담", "desc": "현재 학습 흐름과 목표를 듣습니다."},
-            {"title": "등원 결정", "desc": "적합한 과정과 시간대를 안내합니다."},
-        ]
+    # ★없는 절차를 지어내지 않는다. 하드코딩 3단계(전화 상담/학생 상담/등원 결정)를
+    #   폴백으로 넣던 탓에 학원에 없는 절차가 인쇄물에 나갔다.
+    #   데이터가 없으면 단계 부분만 비우고, 이 면의 나머지(보조 카드·연락처)는 그대로 그린다.
+    if not steps:
+        steps = []
     # ── 단계 수에 맞춰 자동 축소 ──
     # 세로 가용구간: subhead 아래 ~ 5.00(구분선 위). 헤더가 길면 함께 내려간다.
     # ★연락처를 실적 면으로 옮기면 이 면 하단 3인치가 통째로 비었다.
@@ -1019,12 +1057,7 @@ def _panel_admission(slide, schema, x, c):
         y += blk + gap_extra
 
     # ── 남는 자리를 보조 카드로 채운다(간격으로 때우지 않는다) ──
-    _aux = (schema.get("_auxAssign") or {}).get("admission")
-    if not _aux:
-        _own2 = schema.get("_ownPanel") or set()
-        for _k in ("rules", "specials", "faq"):
-            if _k not in _own2 and _aux_rows(schema, _k):
-                _aux = _k; break
+    _aux = _aux_choose(schema, "admission", ("rules", "specials", "faq"))
     if _aux:
         _draw_aux_card(slide, schema, x, c, _aux, y + 0.30,
                        5.74 if _has_contact else 7.56)
@@ -1245,12 +1278,7 @@ def _panel_features(slide, schema, x, c, name):
 
     # ★강점 4개만 있으면 하단 2.5in 가 통째로 비었다.
     #   간격을 벌리지 않고 보조 카드(자주 묻는 질문 등)로 채운다.
-    _aux = (schema.get("_auxAssign") or {}).get("features")
-    if not _aux:
-        _own3 = schema.get("_ownPanel") or set()
-        for _k in ("faq", "rules", "specials", "schedule"):
-            if _k not in _own3 and _aux_rows(schema, _k):
-                _aux = _k; break
+    _aux = _aux_choose(schema, "features", ("faq", "rules", "specials", "schedule"))
     if _aux and y + 0.92 < 7.56:
         _draw_aux_card(slide, schema, x, c, _aux, y + 0.34, 7.56)
 
@@ -1672,7 +1700,9 @@ def _panel_specials(slide, schema, x, c):
 
 
 # ── 섹션 풀: 데이터가 있는 섹션만 패널에 배정 ──────────
-def _has_admission(s):    return bool(_admission_list(s)) or bool(_s((s.get("academy") or {}).get("phone")))
+# ★전화번호만 있어도 True 를 주던 탓에, 절차 데이터가 없는데도 면이 열리고
+#   하드코딩 문구로 채워졌다. 실제 절차가 있을 때만 전용 면을 준다.
+def _has_admission(s):    return bool(_admission_list(s))
 def _has_faq(s):          return bool(_faq_list(s))
 def _has_features(s):     return bool(_feature_list(s))
 def _has_curriculum(s):   return bool(_curriculum_list(s))

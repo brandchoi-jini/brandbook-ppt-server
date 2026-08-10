@@ -705,6 +705,8 @@ def _achievements_page(prs, pal, d, groups, pi=1, parts=1):
         for ii, it in enumerate(g["items"]):
             title  = str(it.get("title") or it.get("name") or "").strip()
             change = str(it.get("change") or "").strip()
+            # ★change 값이 '→' 로 시작하면 아래에서 붙이는 화살표와 겹쳐 '→ →' 가 됐다.
+            change = re.sub(r"^\s*(?:→|->|⇒)\s*", "", change)
             note   = str(it.get("note") or "").strip()
             if not change and not note:
                 ls = [t.strip() for t in str(it.get("desc","")).split("\n") if t.strip()]
