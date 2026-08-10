@@ -936,6 +936,7 @@ def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
     # ★설명까지 넣으면 1개만 들어가는 경우가 많았다(특강 5개 중 1개).
     #   ①글자 축소 → ②설명 접고 제목만 → 순서로 <전부> 싣는 쪽을 택한다.
     size, with_desc = BODY, True
+
     def _fit(size, with_desc):
         hs, keep, used = [], [], PAD_T
         for t, d in rows:
@@ -946,10 +947,31 @@ def _draw_aux_card(slide, schema, x, c, key, y_top, y_bot):
                 break
             keep.append((t, d if with_desc else "", max(0.22, th), dh)); used += rh
         return keep, used
-    keep, used = _fit(size, True)
+
+    def _fit_mixed(size):
+        """★설명을 통째로 접으면 '운영 시간', '상담 비용' 처럼 라벨만 남아
+        읽을 내용이 없는 카드가 됐다. 들어가는 항목까지는 설명을 싣고,
+        남는 항목은 제목만 실어 <전부 싣기>와 <내용 싣기>를 함께 만족시킨다."""
+        limit = (y_bot - y_top) - 0.80 - PAD_B
+        th_all = [(_need_h(t, IW, size, pad=0.02) if t else 0.0) for t, d in rows]
+        keep, used = [], PAD_T
+        for i, (t, d) in enumerate(rows):
+            th = max(0.22, th_all[i])
+            # 뒤에 남은 항목을 제목만으로 실을 때 필요한 높이
+            rest = sum(max(0.22, th_all[j]) + GAP for j in range(i + 1, len(rows)))
+            dh = _need_h(d, IW, size, pad=0.02) if d else 0.0
+            if dh and used + th + dh + 0.02 + GAP + rest <= limit:
+                keep.append((t, d, th, dh)); used += th + dh + 0.02 + GAP
+            elif used + th + GAP + rest <= limit:
+                keep.append((t, "", th, 0.0)); used += th + GAP
+            else:
+                break
+        return keep, used
+
+    keep, used = _fit_mixed(size)
     while len(keep) < len(rows) and size > MIN_BODY:
         size -= 0.5
-        keep, used = _fit(size, True)
+        keep, used = _fit_mixed(size)
     two_col = False
     if len(keep) < len(rows):
         size, with_desc = BODY, False
