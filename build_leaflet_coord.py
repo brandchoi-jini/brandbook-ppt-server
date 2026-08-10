@@ -1945,28 +1945,21 @@ def _panel_combo(slide, schema, x, c, parts):
     _FOLD_LAST = ("자주 묻는 질문", "학습 관리", "특강 및 기타 수업")
 
     def _fold_targets():
-        """접을 수 있는 (블록, 행) 목록. 뒤쪽 행부터, 보호 블록은 나중에.
-        ★블록 순서대로 몰아 접으면 앞 블록(자주 묻는 질문)의 답변이
-          통째로 먼저 날아갔다. 블록끼리 번갈아 접어 양쪽 앞 항목을 지킨다."""
+        """다음에 접을 (블록, 행) 하나를 고른다. 없으면 빈 목록.
+        ★교대 접기를 <목록 순서>로 만들었더니, 매번 목록을 새로 만들고
+          첫 항목만 접는 구조 탓에 늘 첫 블록(자주 묻는 질문)이 다시 1순위가
+          되어 답변만 전부 날아갔다.
+          <설명이 가장 많이 남아 있는 블록>의 마지막 행을 접어 균형을 맞춘다."""
         plain, keep = [], []
         for bi, (ti, rows) in enumerate(blocks):
-            cand = [(bi, ri) for ri in range(len(rows) - 1, -1, -1)
-                    if rows[ri][1] and (bi, ri) not in nodesc and bi not in nodesc]
-            (keep if ti in _FOLD_LAST else plain).append(cand)
-
-        def _weave(groups):
-            out, i = [], 0
-            while True:
-                added = False
-                for g in groups:
-                    if i < len(g):
-                        out.append(g[i]); added = True
-                if not added:
-                    break
-                i += 1
-            return out
-
-        return _weave(plain) + _weave(keep)
+            alive = [(bi, ri) for ri in range(len(rows) - 1, -1, -1)
+                     if rows[ri][1] and (bi, ri) not in nodesc and bi not in nodesc]
+            if alive:
+                (keep if ti in _FOLD_LAST else plain).append(alive)
+        pool = plain or keep
+        if not pool:
+            return []
+        return [max(pool, key=len)[0]]
 
     while total > AVAIL:
         _tg = _fold_targets()
