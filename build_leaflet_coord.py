@@ -768,11 +768,17 @@ def _mgmt_list(schema):
     return out[:4]
 
 
+# ★질문 앞에 이미 'Q1.' 'Q.' '질문 1)' 이 붙어 오는 경우가 있다.
+#   렌더러가 'Q. ' 를 한 번 더 붙여 "Q. Q1. 어떤 학생에게…" 로 나왔다.
+_Q_PREFIX = re.compile(r"^\s*(?:Q|q|질문)\s*\d*\s*[.)\]:·-]*\s*")
+_A_PREFIX = re.compile(r"^\s*(?:A|a|답변)\s*\d*\s*[.)\]:·-]*\s*")
+
+
 def _faq_list(schema):
     out = []
     for it in _items(schema.get("faq"))[:4]:
-        q = _s(it.get("q") or it.get("question"))
-        a = _s(it.get("a") or it.get("answer") or it.get("desc"))
+        q = _Q_PREFIX.sub("", _s(it.get("q") or it.get("question")))
+        a = _A_PREFIX.sub("", _s(it.get("a") or it.get("answer") or it.get("desc")))
         if q:
             out.append({"q": q, "a": a})
     return out
@@ -1311,9 +1317,14 @@ def _panel_features(slide, schema, x, c, name):
 _GRADE_SPLIT = re.compile(r"(?=(?:초|중|고)\s?[1-6](?:\s|·|,))")
 _GRADE_HEAD = re.compile(r"^((?:초|중|고)\s?[1-6])\s*[·,]?\s*(.*)$", re.S)
 
+# ★생성 단계에서 다음 구간 표시로 붙는 '[중등]' 같은 꼬리표가 본문에 남아
+#   "…읽기 루틴을 만든다. [중등]" 처럼 인쇄물에 그대로 찍혔다.
+_GRP_TAG = re.compile(r"\s*\[\s*(?:예비)?\s*(?:초등|중등|고등|초|중|고)\s*(?:부)?\s*\]\s*")
+
+
 def _grade_rows(detail):
     """상세 텍스트 → [(학년라벨, 내용)] . 학년 표기가 없으면 [("", 전체)]."""
-    t = _s(detail)
+    t = _GRP_TAG.sub(" ", _s(detail)).strip()
     if not t:
         return []
     # 줄바꿈이 이미 있으면 그것을 우선 존중한다
@@ -1893,15 +1904,21 @@ def _panel_combo(slide, schema, x, c, parts):
     AVAIL = Y_END - Y0
 
     def _plan(bl, size, nodesc=()):
-        """블록 목록 → (측정치, 전체높이). nodesc 에 든 인덱스는 설명을 접는다."""
+        """블록 목록 → (측정치, 전체높이).
+        nodesc 에는 <블록 인덱스> 또는 <(블록, 행) 쌍> 이 들어간다.
+        ★예전에는 블록 인덱스만 받아 그 블록의 설명을 통째로 접었다.
+          FAQ와 학습 관리 둘만 있으면 한쪽은 반드시 라벨만 남아
+          '수업 방식 / 근거 확인 / 내신 대비' 처럼 읽을 내용이 사라졌다.
+          이제 행 단위로 접어 앞 항목의 설명을 지킨다."""
         out, total = [], 0.0
         for bi, (ti, rows) in enumerate(bl):
             hs = []
-            for t, d in rows:
+            for ri, (t, d) in enumerate(rows):
                 _qa = (bl[bi][0] == "자주 묻는 질문")
+                _skip = (bi in nodesc) or ((bi, ri) in nodesc)
                 th = _need_h(("Q. " + t) if _qa else t, IW, size, pad=0.02) if t else 0.0
                 dh = (_need_h(d, IW - (0.20 if _qa else 0.0), size, pad=0.02)
-                      if (d and bi not in nodesc) else 0.0)
+                      if (d and not _skip) else 0.0)
                 hs.append((max(0.21, th), dh))
             _qgap = 0.06 if (bl[bi][0] == "자주 묻는 질문") else 0.0
             card = PAD_T + sum(a + (b + 0.02 if b else 0.0) for a, b in hs) \
@@ -1926,13 +1943,23 @@ def _panel_combo(slide, schema, x, c, parts):
     #   그 결과 "과제 / 오답 관리 / 성취도 점검 / 학부모 소통" 라벨만 남아
     #   무엇을 어떻게 관리하는지 알 수 없는 면이 되었다.
     _FOLD_LAST = ("자주 묻는 질문", "학습 관리", "특강 및 기타 수업")
-    def _fold_pick():
-        rest_i = [i for i in range(len(blocks)) if i not in nodesc]
-        keepers = [i for i in rest_i if blocks[i][0] in _FOLD_LAST]
-        pool = [i for i in rest_i if i not in keepers] or keepers
-        return max(pool, key=lambda i: meas[i][3])
-    while total > AVAIL and len(nodesc) < len(blocks):
-        nodesc.add(_fold_pick())
+
+    def _fold_targets():
+        """접을 수 있는 (블록, 행) 목록. 뒤쪽 행부터, 보호 블록은 나중에."""
+        plain, keep = [], []
+        for bi, (ti, rows) in enumerate(blocks):
+            bucket = keep if ti in _FOLD_LAST else plain
+            for ri in range(len(rows) - 1, -1, -1):
+                t, d = rows[ri]
+                if d and (bi, ri) not in nodesc and bi not in nodesc:
+                    bucket.append((bi, ri))
+        return plain + keep
+
+    while total > AVAIL:
+        _tg = _fold_targets()
+        if not _tg:
+            break
+        nodesc.add(_tg[0])
         size = BODY
         while True:
             meas, total = _plan(blocks, size, nodesc)
