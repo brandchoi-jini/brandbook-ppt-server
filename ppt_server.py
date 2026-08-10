@@ -14,6 +14,7 @@ import build_brandbook_v3 as B
 import build_brandbook_book as BOOK
 import to_schema_v3 as TS
 import build_leaflet_coord as LEAFLET
+import build_leaflet_card as LEAFLET_CARD   # 'card_navy' 스킨(수학귀신 시안 기준)
 from content_quality import normalize_raw
 from navy_registry import render as skin_render, list_options as navy_options
 
@@ -34,7 +35,7 @@ def health():
             "build": getattr(B, "BUILD_VERSION", "unknown"),
             "palettes": sorted(VALID_PAL), "skins": ["v3", "book", "navy"],
             "navy": navy_options(),
-            "leaflet_palettes": ["sewon_teal", "sewon_yellow", "navy_amber"]}
+            "leaflet_palettes": ["sewon_teal", "sewon_yellow", "navy_amber", "card_navy"]}
 
 
 @app.post("/validate")
@@ -263,7 +264,16 @@ async def build_leaflet(req: Request):
 
     try:
         # skin=navy 면 새 디자인 리플렛, 아니면 기존 리플렛 그대로
-        if (payload.get("skin") or "").lower() == "navy":
+        # card_navy = 새 리플렛 스킨. 유미니 원본(operations)이 필요해 raw 를 붙여 준다.
+        if (pal or "").lower() == "card_navy":
+            schema = dict(schema)
+            schema["_raw"] = payload.get("raw")
+            _as = payload.get("assets") or {}
+            if _as:
+                schema["assets"] = _as
+            buf = LEAFLET_CARD.build(schema, palette="card_navy",
+                                     assets=_as)
+        elif (payload.get("skin") or "").lower() == "navy":
             _as = payload.get("assets") or {}
             if _as:
                 schema = dict(schema)
