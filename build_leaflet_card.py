@@ -298,6 +298,27 @@ def _qr_grid(slide, x, y, items, w=CWID):
 
 # ══════════ 데이터 읽기 ══════════
 
+def _basic(schema) -> Dict[str, Any]:
+    raw = schema.get("_raw")
+    b = raw.get("basic") if isinstance(raw, dict) else None
+    return b if isinstance(b, dict) else {}
+
+
+def _intro_ch(schema) -> Dict[str, Any]:
+    raw = schema.get("_raw")
+    c = raw.get("introChannel") if isinstance(raw, dict) else None
+    return c if isinstance(c, dict) else {}
+
+
+def _addr(schema) -> str:
+    """★academy.location 은 '운양역 4번 출구 도보 1분…' 같은 오시는 길 설명이라
+    주소 칸에 넣으면 안 된다. 사업장 주소를 먼저 쓴다."""
+    ac = schema.get("academy") or {}
+    return _first(_basic(schema).get("businessAddress"),
+                  ac.get("address"), ac.get("address_short"),
+                  ac.get("location"), default="")
+
+
 def _ops(schema) -> Dict[str, Any]:
     """유미니 원본의 operations. 서버가 schema['_raw'] 로 붙여 준다."""
     raw = schema.get("_raw")
@@ -352,6 +373,39 @@ def _fee_rows(schema) -> List[Tuple[str, str]]:
     return out
 
 
+def _clip_sent(text, n):
+    """문장 단위로 잘라 n자 이내로. ★소개문이 길어 패널이 빽빽했다."""
+    t = _s(text)
+    if len(t) <= n:
+        return t
+    cut = t[:n]
+    for mark in ("다. ", "다.", ". "):
+        i = cut.rfind(mark)
+        if i > n * 0.5:
+            return cut[:i + len(mark)].strip()
+    return cut.rstrip() + "…"
+
+
+def _ach_rows(schema) -> List[Tuple[str, str]]:
+    """실적 → (라벨, 값). ★items 는 {title, change, note} 구조다.
+    기존 헬퍼가 문자열로 합친 것을 다시 쪼개다 보니
+    '2021~2025년 매년 수상' 같은 설명이 알약 라벨로 들어갔다."""
+    ach = schema.get("achievements") or {}
+    src = _items(ach)
+    if not src and isinstance(ach, dict):
+        for g in (ach.get("groups") or []):
+            src.extend(_items(g))
+    out = []
+    for it in src[:4]:
+        label = _s(it.get("title") or it.get("name"))
+        val = " · ".join(v for v in [_s(it.get("change")), _s(it.get("note"))] if v)
+        if not val:
+            val = _s(it.get("desc") or it.get("body"))
+        if label or val:
+            out.append((label, val))
+    return out
+
+
 def _rule_rows(schema) -> List[Tuple[str, str]]:
     src = _items(schema.get("rules")) or _items(schema.get("policy"))
     out = []
@@ -382,8 +436,11 @@ def _target_rows(schema) -> List[Tuple[str, str, str]]:
     out = []
     for it in _items(tg)[:4]:
         g = _s(it.get("grade") or it.get("title") or it.get("name"))
-        d = _s(it.get("desc") or it.get("body"))
+        # ★desc 는 항상 빈 문자열로 오고 실제 내용은 subj(개설 반 나열)에 있다.
+        d = _first(it.get("desc"), it.get("body"), it.get("subj"), default="")
         sj = _s(it.get("subject") or it.get("subjects"))
+        if not sj and _s(it.get("subj")) and d != _s(it.get("subj")):
+            sj = _s(it.get("subj"))
         if g or d:
             out.append((g, d, sj))
     return out
@@ -418,18 +475,32 @@ def _specials_line(schema) -> str:
 
 
 def _channels(schema) -> List[Tuple[str, str]]:
+    """★유미니 실제 키는 naverMapUrl · kakaoMapUrl · blogUrl · snsUrl ·
+    kakaoChannel 이다. kakaoChatUrl·instagramUrl 을 찾고 있어 못 읽었다."""
     ac = schema.get("academy") or {}
-    raw = schema.get("_raw") if isinstance(schema.get("_raw"), dict) else {}
-    ch = (raw.get("introChannel") or {}) if isinstance(raw, dict) else {}
-    return [
-        ("네이버 예약·지도", _first(ac.get("naverMapUrl"), ch.get("naverMapUrl"),
-                              ch.get("naverReservationUrl"), default="")),
-        ("카카오톡 상담", _first(ac.get("kakaoChatUrl"), ch.get("kakaoChatUrl"),
-                            default="")),
-        ("인스타그램", _first(ch.get("instagramUrl"), default="")),
-        ("네이버 블로그", _first(ch.get("blogUrl"), ch.get("naverBlogUrl"),
-                            default="")),
+    ch = _intro_ch(schema)
+
+    def _u(v):
+        # ★kakaoChannel 은 문자열이 아니라 {profileId, chatUrl} 객체로 온다.
+        if isinstance(v, dict):
+            v = v.get("chatUrl") or v.get("url") or v.get("profileId") or ""
+        v = _s(v)
+        if not v:
+            return ""
+        if v.startswith("http"):
+            return v
+        if v.startswith("@"):            # 카카오 채널 ID
+            return "https://pf.kakao.com/" + v.lstrip("@")
+        return ""
+
+    out = [
+        ("네이버 지도", _u(_first(ac.get("naverMapUrl"), ch.get("naverMapUrl"),
+                             default=""))),
+        ("카카오톡 상담", _u(ch.get("kakaoChannel") or ch.get("kakaoMapUrl"))),
+        ("네이버 블로그", _u(ch.get("blogUrl"))),
+        ("SNS", _u(ch.get("snsUrl"))),
     ]
+    return [(c, u) for c, u in out if u]
 
 
 # ══════════ 앞면 ══════════
@@ -444,9 +515,7 @@ def _front_contact(slide, schema, x):
     y += _head(slide, x, y, (region + "\n" + name) if region else name) + 0.10
 
     y = _kv(slide, x, y, "전화", _s(ac.get("phone")))
-    y = _kv(slide, x, y, "주소",
-            _first(ac.get("address"), ac.get("location"),
-                   ac.get("address_short"), default=""))
+    y = _kv(slide, x, y, "주소", _addr(schema))
 
     hours = _hour_rows(schema)
     if hours:
@@ -586,9 +655,8 @@ def _front_cover(slide, schema, x, assets):
 
     _text(slide, _s(ac.get("phone")), x, 7.14, CWID, 0.26, size=12.0,
           color=WHITE, bold=True, fit=False)
-    _text(slide, _first(ac.get("address"), ac.get("location"), default=""),
-          x, 7.42, CWID, 0.36, size=TINY_PT, color=ON_NAVY, line_spacing=1.24,
-          min_size=MIN_BODY)
+    _text(slide, _addr(schema), x, 7.42, CWID, 0.36, size=TINY_PT,
+          color=ON_NAVY, line_spacing=1.24, min_size=MIN_BODY)
 
 
 # ══════════ 뒷면 ══════════
@@ -606,23 +674,14 @@ def _back_why(slide, schema, x):
 
     intro = _s((schema.get("intro") or {}).get("body") or cp.get("intro"))
     if intro:
-        ih = min(1.30, max(0.40, _need_h(intro, CWID, 10.0,
+        intro = _clip_sent(intro, 300)
+        ih = min(1.42, max(0.40, _need_h(intro, CWID, 10.0,
                                          line_spacing=1.34, pad=0.02)))
         _text(slide, intro, x, y, CWID, ih, size=10.0, color=BODY,
               line_spacing=1.34, min_size=MIN_BODY)
         y += ih + 0.20
 
-    head, lines = _achievement_lines(schema)
-    rows = []
-    for ln in lines[:4]:
-        s = _s(ln)
-        for sep in (" — ", " · ", ": "):
-            if sep in s:
-                a, b = s.split(sep, 1)
-                rows.append((a.strip(), b.strip()))
-                break
-        else:
-            rows.append(("", s))
+    rows = _ach_rows(schema)
     if rows:
         _label(slide, x, y, "주요 실적", color=INK)
         y += 0.24
